@@ -15,6 +15,7 @@ import settingsRoutes from './routes/settingsRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
+import { getPortalHtml } from './views/portalHtml';
 
 export function createApp() {
   const app = express();
@@ -60,6 +61,12 @@ export function createApp() {
 
   // Root & Health check endpoints
   app.get(['/', '/api', '/api/index'], (req, res) => {
+    // If request accepts HTML (like a browser), serve the rich interactive web portal
+    if (req.accepts('html') && !req.xhr && !req.path.endsWith('.json')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(getPortalHtml());
+    }
+
     res.json({
       name: 'Earn Sheet API Server',
       status: 'online',
