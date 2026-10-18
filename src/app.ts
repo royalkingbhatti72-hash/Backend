@@ -19,12 +19,14 @@ import { config } from './config';
 export function createApp() {
   const app = express();
 
-  // CORS - allow requests from the frontend domain
+  // CORS - allow requests from any frontend origin with credentials support
   app.use(cors({
-    origin: config.corsOrigin,
+    origin: (origin, callback) => {
+      callback(null, true);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   }));
 
   app.use(express.json());
@@ -50,9 +52,9 @@ export function createApp() {
   // Root & Health check endpoints
   app.get('/', (req, res) => {
     res.json({
-      name: 'Royal Rewards API Server',
+      name: 'Earn Sheet API Server',
       status: 'online',
-      message: 'Backend API server is running. Access the frontend app at http://localhost:5173',
+      message: 'Backend API server is running.',
       endpoints: {
         health: '/api/health',
         publicSettings: '/api/settings/public',
@@ -61,7 +63,7 @@ export function createApp() {
   });
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', name: 'Royal Rewards API', timestamp: new Date() });
+    res.json({ status: 'ok', name: 'Earn Sheet API', timestamp: new Date() });
   });
 
   // Chrome DevTools probe & favicon handlers to prevent 404 warnings
