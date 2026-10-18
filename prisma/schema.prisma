@@ -1,0 +1,371 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                  String   @id @default(cuid())
+  name                String
+  phone               String   @unique
+  passwordHash        String
+  referralCode        String   @unique
+  referredById        String?
+  accountStatus       String   @default("ACTIVE") // ACTIVE, SUSPENDED
+  mustChangePassword  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  referredBy          User?    @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals           User[]   @relation("UserReferrals")
+
+  wallet              Wallet?
+  levelProgress       UserLevelProgress[]
+  taskProgress        UserTaskProgress[]
+  submissions         TaskSubmission[]
+  unlockTransactions  TaskUnlockTransaction[]
+  depositRequests     DepositRequest[]
+  withdrawalRequests  WithdrawalRequest[]
+  spinEntitlements    UserSpinEntitlement[]
+  spinHistories       SpinHistory[]
+  notifications       Notification[]
+  transactions        WalletTransaction[]
+  sessions            Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("SUPER_ADMIN") // SUPER_ADMIN, ADMIN
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Level {
+  id                String   @id @default(cuid())
+  levelNumber       Int      @unique
+  title             String
+  description       String
+  status            String   @default("ACTIVE") // ACTIVE, DISABLED
+  requiredTaskCount Int      @default(10)
+  completionReward  Float    @default(0)
+  totalCreditPoints Int      @default(100)
+  displayOrder      Int      @default(1)
+  bannerUrl         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tasks             Task[]
+  userProgress      UserLevelProgress[]
+}
+
+model Task {
+  id                    String   @id @default(cuid())
+  levelId               String
+  taskNumber            Int
+  title                 String
+  description           String
+  taskType              String   @default("Custom Task") // Social Media, YouTube Promotion, Follow Page, Comment on Post, Watch Video, Join Group, App Installation, Survey, Referral, Custom Task
+  rewardAmount          Float    @default(0)
+  creditPoints          Int      @default(5)
+  isPaid                Boolean  @default(false)
+  unlockFee             Float    @default(0)
+  protectedUrl          String?
+  instructions          String
+  lockMessage           String   @default("Complete and receive approval for the previous task to unlock this task.")
+  submissionInstructions String  @default("Submit task confirmation notes or screenshot reference for admin review.")
+  externalContact       String?
+  requiresAdminApproval Boolean  @default(true)
+  status                String   @default("ACTIVE") // ACTIVE, DISABLED
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  level                 Level    @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  userProgress          UserTaskProgress[]
+  submissions           TaskSubmission[]
+  unlockTransactions    TaskUnlockTransaction[]
+
+  @@unique([levelId, taskNumber])
+}
+
+model UserLevelProgress {
+  id                String    @id @default(cuid())
+  userId            String
+  levelId           String
+  completionStatus  String    @default("LOCKED") // LOCKED, IN_PROGRESS, COMPLETED
+  approvedTaskCount Int       @default(0)
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level             Level     @relation(fields: [levelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, levelId])
+}
+
+model UserTaskProgress {
+  id              String    @id @default(cuid())
+  userId          String
+  taskId          String
+  status          String    @default("LOCKED") // LOCKED, AVAILABLE, AWAITING_PAYMENT, UNLOCKED, IN_PROGRESS, PENDING_VERIFICATION, APPROVED, REJECTED, DISABLED
+  isPaidUnlocked  Boolean   @default(false)
+  unlockedAt      DateTime?
+  submissionAt    DateTime?
+  approvedAt      DateTime?
+  reviewerId      String?
+  rejectionReason String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, taskId])
+}
+
+model TaskSubmission {
+  id                   String   @id @default(cuid())
+  userId               String
+  taskId               String
+  status               String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  submissionNotes      String?
+  proofEvidence        String?
+  reviewerId           String?
+  reviewerName         String?
+  reviewNotes          String?
+  rejectionReason      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task                 Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model TaskUnlockTransaction {
+  id            String   @id @default(cuid())
+  userId        String
+  taskId        String
+  unlockFee     Float
+  transactionId String   @unique
+  status        String   @default("COMPLETED") // COMPLETED, REFUNDED
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Wallet {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  currency         String   @default("PKR")
+  availableBalance Float    @default(0)
+  pendingBalance   Float    @default(0)
+  totalEarned      Float    @default(0)
+  totalDeposited   Float    @default(0)
+  totalWithdrawn   Float    @default(0)
+  totalUnlockFees  Float    @default(0)
+  creditPoints     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WalletTransaction {
+  id              String   @id @default(cuid())
+  userId          String
+  transactionType String   // DEPOSIT_CREDIT, TASK_REWARD, LEVEL_REWARD, REFERRAL_REWARD, SPIN_REWARD, TASK_UNLOCK_FEE, WITHDRAWAL_RESERVATION, WITHDRAWAL_REVERSAL, WITHDRAWAL_PAID, ADMIN_CREDIT, ADMIN_DEBIT, REFUND, ADJUSTMENT
+  amount          Float
+  currency        String   @default("PKR")
+  status          String   @default("COMPLETED") // COMPLETED, PENDING, REVERSED, REJECTED
+  relatedEntityId String?
+  idempotencyKey  String?  @unique
+  actorId         String?  // Admin ID or System or User ID
+  actorName       String?
+  reason          String
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DepositRequest {
+  id                   String   @id @default(cuid())
+  userId               String
+  amount               Float
+  paymentMethod        String   // EASYPAISA, JAZZCASH, BANK_TRANSFER
+  transactionReference String
+  proofEvidence        String?
+  status               String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewerId           String?
+  reviewerName         String?
+  reviewNotes          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WithdrawalRequest {
+  id                  String   @id @default(cuid())
+  userId              String
+  amount              Float
+  paymentMethod       String   // EASYPAISA, JAZZCASH, BANK_TRANSFER
+  recipientName       String
+  recipientAccount    String
+  notes               String?
+  approvalStatus      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  paymentStatus       String   @default("NOT_SENT") // NOT_SENT, PROCESSING, PAID, FAILED
+  reviewerId          String?
+  reviewerName        String?
+  reviewNotes         String?
+  payoutReference     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  id               String   @id @default(cuid())
+  referrerId       String
+  referredId       String
+  qualifyingStatus String   @default("PENDING") // PENDING, QUALIFIED
+  rewardStatus     String   @default("PENDING") // PENDING, CREDITED
+  rewardAmount     Float    @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([referrerId, referredId])
+}
+
+model SpinConfiguration {
+  id                 String   @id @default(cuid())
+  name               String   @default("Default Royal Spin")
+  isEnabled          Boolean  @default(true)
+  minLevelRequired   Int      @default(1)
+  referralsRequired  Int      @default(0)
+  cooldownHours      Int      @default(24)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model SpinPrize {
+  id            String   @id @default(cuid())
+  name          String
+  prizeType     String   @default("CASH") // CASH, PHYSICAL, BONUS
+  monetaryValue Float    @default(0)
+  displayLabel  String
+  color         String   @default("#1459E8")
+  icon          String?  @default("Crown")
+  inventory     Int      @default(999999)
+  status        String   @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  entitlements  UserSpinEntitlement[]
+  spinHistories SpinHistory[]
+}
+
+model UserSpinEntitlement {
+  id                  String      @id @default(cuid())
+  userId              String
+  assignedPrizeId     String?
+  totalSpins          Int         @default(1)
+  remainingSpins      Int         @default(1)
+  isEligible          Boolean     @default(true)
+  triggerReason       String?     // e.g. "Level 1 Task 3 Milestone Free Spin"
+  levelNumber         Int?
+  taskNumber          Int?
+  requiresAdminReview Boolean     @default(false)
+  adminReviewed       Boolean     @default(false)
+  expiresAt           DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedPrize       SpinPrize?  @relation(fields: [assignedPrizeId], references: [id], onDelete: SetNull)
+  spinHistories       SpinHistory[]
+}
+
+model SpinHistory {
+  id            String               @id @default(cuid())
+  userId        String
+  entitlementId String?
+  prizeId       String
+  resultLabel   String
+  prizeValue    Float
+  rewardStatus  String               @default("CREDITED") // CREDITED, FULFILLED, PENDING
+  transactionId String?
+  createdAt     DateTime             @default(now())
+
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entitlement   UserSpinEntitlement? @relation(fields: [entitlementId], references: [id], onDelete: SetNull)
+  prize         SpinPrize            @relation(fields: [prizeId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id               String   @id @default(cuid())
+  userId           String
+  title            String
+  message          String
+  notificationType String   @default("SYSTEM") // REGISTRATION, DEPOSIT_STATUS, WITHDRAWAL_STATUS, TASK_STATUS, LEVEL_STATUS, SPIN_REWARD, REFERRAL_REWARD, PASSWORD_RESET, SYSTEM
+  isRead           Boolean  @default(false)
+  linkUrl          String?
+  createdAt        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  content   String
+  audience  String    @default("ALL") // ALL, USERS
+  status    String    @default("ACTIVE") // ACTIVE, INACTIVE
+  startDate DateTime? @default(now())
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model AdminAuditLog {
+  id            String   @id @default(cuid())
+  adminId       String?
+  adminUsername String
+  action        String
+  entityType    String
+  entityId      String
+  previousState String?  // JSON string
+  newState      String?  // JSON string
+  reason        String?
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+}
+
+model SiteSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  category    String   @default("GENERAL") // GENERAL, BRANDING, TASKS, FINANCE, REFERRAL, SPIN
+  updatedAt   DateTime @updatedAt
+}
