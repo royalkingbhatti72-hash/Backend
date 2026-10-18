@@ -231,9 +231,11 @@ const rawDataset = [
 ];
 
 function cleanUrl(url: string): string {
-  // Extract pure URL if formatted as markdown [url](url) or contains trailing characters
-  const match = url.match(/https?:\/\/[^\s\)\_\]]+/);
-  return match ? match[0] : url.trim();
+  const mdMatch = url.match(/\((https?:\/\/[^\s\)]+)\)/);
+  if (mdMatch) return mdMatch[1].replace(/_+$/, '');
+  const urlMatch = url.match(/https?:\/\/[^\s\)\]]+/);
+  if (urlMatch) return urlMatch[0].replace(/_+$/, '');
+  return url.trim().replace(/^\[|\]$/g, '').replace(/_+$/, '');
 }
 
 async function updateDatabase() {
@@ -292,7 +294,7 @@ async function updateDatabase() {
 
       const taskTitle = isPaid 
         ? `${type} (PKR ${unlockFee.toLocaleString()})` 
-        : `YouTube ${type} Task #${taskNumber}`;
+        : `YouTube ${type}`;
       
       const description = isPaid
         ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields high commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.`

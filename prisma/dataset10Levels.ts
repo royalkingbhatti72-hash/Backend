@@ -18,8 +18,11 @@ export interface LevelDatasetItem {
 }
 
 export function cleanUrl(rawUrl: string): string {
-  const match = rawUrl.match(/https?:\/\/[^\s\)\_\]]+/);
-  return match ? match[0] : rawUrl.trim();
+  const mdMatch = rawUrl.match(/\((https?:\/\/[^\s\)]+)\)/);
+  if (mdMatch) return mdMatch[1].replace(/_+$/, '');
+  const urlMatch = rawUrl.match(/https?:\/\/[^\s\)\]]+/);
+  if (urlMatch) return urlMatch[0].replace(/_+$/, '');
+  return rawUrl.trim().replace(/^\[|\]$/g, '').replace(/_+$/, '');
 }
 
 export const DATASET_10_LEVELS: LevelDatasetItem[] = [

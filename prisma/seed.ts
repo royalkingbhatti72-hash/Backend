@@ -120,7 +120,7 @@ async function main() {
 
       const taskTitle = isPaid
         ? `${type} (PKR ${unlockFee.toLocaleString()})`
-        : `YouTube ${type} Task #${taskNumber}`;
+        : `YouTube ${type}`;
 
       const description = isPaid
         ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.`
