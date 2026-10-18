@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { DATASET_10_LEVELS, cleanUrl } from './dataset10Levels';
 
 const prisma = new PrismaClient();
 
@@ -73,111 +74,111 @@ async function main() {
   }
   console.log(`✅ Seeded ${createdPrizes.length} Spin Prizes`);
 
-  // 4. Exactly 10 Levels & 10 Tasks per Level
-  const levelNames = [
-    { title: 'Apprentice Tier', desc: 'The starting gateway into the royal realm of rewards', reward: 500 },
-    { title: 'Bronze Sovereign', desc: 'Expand your influence and unlock higher daily earnings', reward: 1000 },
-    { title: 'Silver Monarch', desc: 'Step into elite engagement and verified promotions', reward: 1500 },
-    { title: 'Gold Viceroy', desc: 'Command greater yields with high-priority assignments', reward: 2500 },
-    { title: 'Emerald Regent', desc: 'Exclusive partner activations and elevated multipliers', reward: 4000 },
-    { title: 'Ruby Commander', desc: 'Executive campaigns reserved for proven earners', reward: 6000 },
-    { title: 'Sapphire Prince', desc: 'High-value network assignments and community growth', reward: 9000 },
-    { title: 'Diamond Duke', desc: 'Mastery tier featuring premium sponsored missions', reward: 13000 },
-    { title: 'Imperial Archon', desc: 'Apex tier preparing you for royal ascension', reward: 20000 },
-    { title: 'Royal Emperor', desc: 'The crowning achievement of Royal Rewards (Final Level)', reward: 50000 },
-  ];
-
-  const taskTemplates = [
-    { title: 'Official Telegram Channel Join', type: 'Join Group', reward: 50, url: 'https://t.me/royalrewards' },
-    { title: 'Subscribe to YouTube Channel', type: 'YouTube Promotion', reward: 60, url: 'https://youtube.com/@royalrewards' },
-    { title: 'Follow Official Facebook Page', type: 'Follow Page', reward: 50, url: 'https://facebook.com/royalrewards' },
-    { title: 'Engage with Instagram Post', type: 'Social Media', reward: 75, url: 'https://instagram.com/p/royalrewards' },
-    { title: 'Watch Sponsored Explainer Video', type: 'Watch Video', reward: 100, url: 'https://youtube.com/watch?v=royalrewards' },
-    { title: 'Complete Quick Consumer Survey', type: 'Survey', reward: 120, url: 'https://survey.royalrewards.com/q1' },
-    { title: 'Download Partner Rewards App', type: 'App Installation', reward: 150, url: 'https://play.google.com/store/apps/details?id=royalrewards' },
-    { title: 'Share Referral Banner to WhatsApp', type: 'Referral', reward: 180, url: 'https://royalrewards.com/share' },
-    { title: 'VIP High-Engagement Campaign', type: 'YouTube Promotion', reward: 7500, url: 'https://vip.royalrewards.com/campaign-9', isPaid: true, fee: 5000 },
-    { title: 'Royal Imperial Sponsor Mission', type: 'Custom Task', reward: 15000, url: 'https://vip.royalrewards.com/mission-10', isPaid: true, fee: 10000 },
-  ];
-
+  // 4. Exactly 10 Levels & 135 Tasks (from official 10-tier dataset)
   const levels = [];
-  for (let i = 1; i <= 10; i++) {
-    const info = levelNames[i - 1];
+  let totalTasksCount = 0;
+
+  for (const lvlData of DATASET_10_LEVELS) {
+    const levelNumber = lvlData.level;
+    const title = lvlData.title;
+    const requiredTaskCount = lvlData.total_tasks;
+    const completionReward = lvlData.level_reward;
+    const totalCreditPoints = lvlData.total_credit_points;
+
     const level = await prisma.level.upsert({
-      where: { levelNumber: i },
+      where: { levelNumber },
       update: {
-        title: info.title,
-        description: info.desc,
-        completionReward: info.reward,
-        requiredTaskCount: 10,
-        displayOrder: i,
+        title,
+        description: `Complete all ${requiredTaskCount} tasks in Level ${levelNumber} (${title}) to claim the PKR ${completionReward.toLocaleString()} milestone reward.`,
+        requiredTaskCount,
+        completionReward,
+        totalCreditPoints,
+        displayOrder: levelNumber,
         status: 'ACTIVE',
       },
       create: {
-        levelNumber: i,
-        title: info.title,
-        description: info.desc,
-        completionReward: info.reward,
-        requiredTaskCount: 10,
-        displayOrder: i,
+        levelNumber,
+        title,
+        description: `Complete all ${requiredTaskCount} tasks in Level ${levelNumber} (${title}) to claim the PKR ${completionReward.toLocaleString()} milestone reward.`,
+        requiredTaskCount,
+        completionReward,
+        totalCreditPoints,
+        displayOrder: levelNumber,
         status: 'ACTIVE',
       },
     });
     levels.push(level);
 
-    // Create 10 tasks for this level
-    for (let t = 1; t <= 10; t++) {
-      const template = taskTemplates[t - 1];
-      const isPaid = !!template.isPaid;
-      const unlockFee = template.fee || 0;
-      const rewardMultiplier = 1 + (i - 1) * 0.25;
-      const taskReward = Math.round((template.reward || 50) * rewardMultiplier);
+    for (const t of lvlData.tasks) {
+      const taskNumber = t.task_id;
+      const type = t.type;
+      const commission = t.commission;
+      const creditPoints = t.credit_points;
+      const isPaid = t.is_prepaid;
+      const unlockFee = t.prepaid_value || 0;
+      const pureUrl = cleanUrl(t.url);
+
+      const taskTitle = isPaid
+        ? `${type} (PKR ${unlockFee.toLocaleString()})`
+        : `YouTube ${type} Task #${taskNumber}`;
+
+      const description = isPaid
+        ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.`
+        : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission} and ${creditPoints} credit points.`;
+
+      const instructions = isPaid
+        ? `1. Ensure wallet has sufficient balance or deposit PKR ${unlockFee.toLocaleString()}.\n2. Click Unlock Task to pay fee.\n3. Open protected link: ${pureUrl}\n4. Complete engagement steps.\n5. Submit transaction and proof screenshot for admin approval.`
+        : `1. Open link: ${pureUrl}\n2. Perform ${type} action.\n3. Take a screenshot showing proof of action.\n4. Submit reference and proof for instant admin verification.`;
+
+      const lockMessage = taskNumber === 1
+        ? (levelNumber === 1 ? 'Available to start' : `Complete and receive approval for all tasks in Level ${levelNumber - 1} to unlock Level ${levelNumber}.`)
+        : `Complete and receive approval for Task ${taskNumber - 1} to unlock this task.`;
 
       await prisma.task.upsert({
         where: {
           levelId_taskNumber: {
             levelId: level.id,
-            taskNumber: t,
+            taskNumber,
           },
         },
         update: {
-          title: `L${i}-T${t}: ${template.title}`,
-          description: `Level ${i} Task ${t} assignment. Complete sequential steps to claim verified PKR reward.`,
-          taskType: template.type,
-          rewardAmount: isPaid ? template.reward : taskReward,
-          isPaid: isPaid,
-          unlockFee: unlockFee,
-          protectedUrl: template.url,
-          instructions: `1. Open the protected assignment link.\n2. Complete the required activity carefully.\n3. Take a screenshot showing proof of completion.\n4. Send evidence to the verification line with your Royal ID.\n5. Click "Submit for Review" below.`,
-          lockMessage: t === 1 
-            ? (i === 1 ? 'Available to start' : `Complete and receive approval for all 10 tasks in Level ${i - 1} to unlock Level ${i}.`)
-            : `Complete and receive approval for Task ${t - 1} to unlock this task.`,
-          submissionInstructions: 'Submit proof reference or transaction details for administrator verification.',
+          title: taskTitle,
+          description,
+          taskType: type,
+          rewardAmount: commission,
+          creditPoints,
+          isPaid,
+          unlockFee,
+          protectedUrl: pureUrl,
+          instructions,
+          lockMessage,
+          submissionInstructions: 'Submit proof reference or transaction details for verification.',
           requiresAdminApproval: true,
           status: 'ACTIVE',
         },
         create: {
           levelId: level.id,
-          taskNumber: t,
-          title: `L${i}-T${t}: ${template.title}`,
-          description: `Level ${i} Task ${t} assignment. Complete sequential steps to claim verified PKR reward.`,
-          taskType: template.type,
-          rewardAmount: isPaid ? template.reward : taskReward,
-          isPaid: isPaid,
-          unlockFee: unlockFee,
-          protectedUrl: template.url,
-          instructions: `1. Open the protected assignment link.\n2. Complete the required activity carefully.\n3. Take a screenshot showing proof of completion.\n4. Send evidence to the verification line with your Royal ID.\n5. Click "Submit for Review" below.`,
-          lockMessage: t === 1 
-            ? (i === 1 ? 'Available to start' : `Complete and receive approval for all 10 tasks in Level ${i - 1} to unlock Level ${i}.`)
-            : `Complete and receive approval for Task ${t - 1} to unlock this task.`,
-          submissionInstructions: 'Submit proof reference or transaction details for administrator verification.',
+          taskNumber,
+          title: taskTitle,
+          description,
+          taskType: type,
+          rewardAmount: commission,
+          creditPoints,
+          isPaid,
+          unlockFee,
+          protectedUrl: pureUrl,
+          instructions,
+          lockMessage,
+          submissionInstructions: 'Submit proof reference or transaction details for verification.',
           requiresAdminApproval: true,
           status: 'ACTIVE',
         },
       });
+
+      totalTasksCount++;
     }
   }
-  console.log(`✅ Seeded 10 Levels and 100 Tasks (10 per level)`);
+  console.log(`✅ Seeded 10 Levels and ${totalTasksCount} Tasks with complete dataset`);
 
   // 5. Demo Test User
   const demoUserPassword = await bcrypt.hash('Password123!', 10);

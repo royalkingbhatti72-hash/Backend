@@ -3,5 +3,7 @@ dist
 *.db
 *.db-journal
 .env
+.env.production
+.env.*
 .DS_Store
 *.log
