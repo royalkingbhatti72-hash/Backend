@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
@@ -76,10 +81,30 @@ export function createApp() {
     res.json({ status: 'ok', name: 'Earn Sheet API', timestamp: new Date() });
   });
 
-  // Serve the complete Royal Administration Portal SPA on any non-API GET route
+  // Static assets for the Royal Administration Portal
+  const publicDir = path.resolve(__dirname, '../public');
+  const backendAssetsDir = path.resolve(__dirname, '../assets');
+  const rootAssetsDir = path.resolve(process.cwd(), 'assets');
+  const rootPublicAssetsDir = path.resolve(process.cwd(), 'public/assets');
+
+  app.use('/assets', express.static(path.join(publicDir, 'assets')));
+  app.use('/assets', express.static(backendAssetsDir));
+  app.use('/assets', express.static(rootPublicAssetsDir));
+  app.use('/assets', express.static(rootAssetsDir));
+  app.use(express.static(publicDir));
+  app.use(express.static(path.resolve(process.cwd(), 'public')));
+
+  // Serve the complete Royal Administration Portal SPA on any non-API GET or HEAD route
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+    if (
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      !req.path.startsWith('/api') &&
+      !req.path.startsWith('/assets')
+    ) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      if (req.method === 'HEAD') {
+        return res.status(200).end();
+      }
       return res.status(200).send(getAdminSpaHtml());
     }
     next();
