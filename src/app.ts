@@ -80,7 +80,7 @@ export function createApp() {
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(getAdminSpaHtml());
+      return res.status(200).send(getAdminSpaHtml());
     }
     next();
   });
