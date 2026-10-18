@@ -50,7 +50,7 @@ export function createApp() {
   app.use('/api/admin', adminRoutes);
 
   // Root & Health check endpoints
-  app.get('/', (req, res) => {
+  app.get(['/', '/api'], (req, res) => {
     res.json({
       name: 'Earn Sheet API Server',
       status: 'online',
