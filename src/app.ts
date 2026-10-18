@@ -15,7 +15,7 @@ import settingsRoutes from './routes/settingsRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
-import { getPortalHtml } from './views/portalHtml';
+import { getAdminSpaHtml } from './views/adminHtml';
 
 export function createApp() {
   const app = express();
@@ -60,13 +60,7 @@ export function createApp() {
   app.use('/api/admin', adminRoutes);
 
   // Root & Health check endpoints
-  app.get(['/', '/api', '/api/index'], (req, res) => {
-    // If request accepts HTML (like a browser), serve the rich interactive web portal
-    if (req.accepts('html') && !req.xhr && !req.path.endsWith('.json')) {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(getPortalHtml());
-    }
-
+  app.get(['/api', '/api/index'], (req, res) => {
     res.json({
       name: 'Earn Sheet API Server',
       status: 'online',
@@ -80,6 +74,15 @@ export function createApp() {
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', name: 'Earn Sheet API', timestamp: new Date() });
+  });
+
+  // Serve the complete Royal Administration Portal SPA on any non-API GET route
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(getAdminSpaHtml());
+    }
+    next();
   });
 
   // Chrome DevTools probe & favicon handlers to prevent 404 warnings
