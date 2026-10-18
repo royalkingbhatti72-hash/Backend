@@ -4,7 +4,7 @@
   "description": "Earn Sheet - Backend API Server",
   "type": "module",
   "scripts": {
-    "build": "prisma generate",
+    "build": "prisma generate && esbuild api/index.ts --bundle --platform=node --target=node18 --format=esm --packages=external --outfile=api/index.js",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "prisma:generate": "prisma generate",
