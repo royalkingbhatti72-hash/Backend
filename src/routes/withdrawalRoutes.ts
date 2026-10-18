@@ -63,24 +63,16 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
     const userId = req.user!.id;
     const validated = withdrawalSchema.parse(req.body);
 
-    // Minimum withdrawal check
-    const minSetting = await prisma.siteSetting.findUnique({ where: { key: 'min_withdrawal' } });
-    const minWithdrawal = minSetting ? parseFloat(minSetting.value) : 1000;
-
-    if (validated.amount < minWithdrawal) {
-      return res.status(400).json({ error: `Minimum withdrawal amount is PKR ${minWithdrawal.toLocaleString()}` });
-    }
-
     // Verify wallet balance
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
-    if (!wallet || wallet.availableBalance < validated.amount) {
+    if (!wallet || wallet.availableBalance <= 0) {
       return res.status(400).json({
-        error: `Insufficient available balance. You have PKR ${wallet?.availableBalance.toLocaleString() || 0}, but requested PKR ${validated.amount.toLocaleString()}.`,
+        error: 'You have no available balance to withdraw.',
       });
     }
 
-    // Level-based withdrawal percentage check
-    // Each completed level unlocks 10% withdrawal of total account balance (Level 10 = 100%)
+    // Calculate exact amount available for withdrawal
+    let exactAvailable = wallet.availableBalance;
     if (process.env.NODE_ENV !== 'test') {
       const allLevels = await prisma.level.findMany();
       let completedLevels = 0;
@@ -92,18 +84,27 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       }
 
       const percent = Math.min(100, completedLevels * 10);
-      if (percent <= 0) {
+      if (percent <= 0 && completedLevels === 0) {
         return res.status(400).json({
-          error: 'Withdrawals unlock progressively per level. Complete all 10 tasks in Level 1 to unlock your first 10% withdrawal quota!',
+          error: 'Withdrawals unlock progressively per level. Complete all 10 tasks in Level 1 to unlock your withdrawal quota!',
         });
       }
 
-      const maxAllowed = Math.floor((wallet.availableBalance * percent) / 100);
-      if (validated.amount > maxAllowed) {
-        return res.status(400).json({
-          error: `You have completed ${completedLevels} level(s), allowing you to withdraw up to ${percent}% of your balance (Max: PKR ${maxAllowed.toLocaleString()}). Complete more levels to unlock up to 100%!`,
-        });
-      }
+      exactAvailable = percent > 0 ? Math.floor((wallet.availableBalance * percent) / 100) : wallet.availableBalance;
+    }
+
+    if (exactAvailable <= 0) {
+      return res.status(400).json({
+        error: 'No withdrawable balance is currently available in your account.',
+      });
+    }
+
+    // Withdrawal can ONLY be for the exact amount that is available for withdrawal
+    if (Math.abs(validated.amount - exactAvailable) > 0.01) {
+      return res.status(400).json({
+        error: `Withdrawal can only be requested for the exact available amount of PKR ${exactAvailable.toLocaleString()}. Custom or partial amounts are not permitted.`,
+        exactAvailable,
+      });
     }
 
     // Execute atomic reservation

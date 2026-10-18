@@ -64,6 +64,13 @@ export const taskProgressionService = {
       }
     }
 
+    // Fetch user wallet balance to evaluate prepaid balance requirements
+    const wallet = await prisma.wallet.findUnique({
+      where: { userId },
+      select: { availableBalance: true },
+    });
+    const userBalance = wallet?.availableBalance || 0;
+
     // Fetch existing user task progress records for this level
     const userProgressRecords = await prisma.userTaskProgress.findMany({
       where: {
@@ -73,7 +80,7 @@ export const taskProgressionService = {
     });
     const progressMap = new Map(userProgressRecords.map((p) => [p.taskId, p]));
 
-    // Fetch user submissions for this level
+    // Fetch user submissions for this level (ordered latest first)
     const submissions = await prisma.taskSubmission.findMany({
       where: {
         userId,
@@ -81,7 +88,13 @@ export const taskProgressionService = {
       },
       orderBy: { createdAt: 'desc' },
     });
-    const submissionMap = new Map(submissions.map((s) => [s.taskId, s]));
+    // Keep the latest submission per task
+    const submissionMap = new Map<string, any>();
+    for (const s of submissions) {
+      if (!submissionMap.has(s.taskId)) {
+        submissionMap.set(s.taskId, s);
+      }
+    }
 
     const evaluatedTasks: EvaluatedTask[] = [];
     let previousTaskApproved = isLevelUnlocked;
@@ -93,22 +106,40 @@ export const taskProgressionService = {
       let userStatus: EvaluatedTask['userStatus'] = 'LOCKED';
       let isPaidUnlocked = progress?.isPaidUnlocked || false;
 
+      // A task is approved if UserTaskProgress is APPROVED or TaskSubmission is APPROVED
+      const isApproved = progress?.status === 'APPROVED' || submission?.status === 'APPROVED';
+
+      // Check whether prerequisite task (taskNumber - 1) is satisfied
+      const prevTask = level.tasks.find((t) => t.taskNumber === task.taskNumber - 1);
+      const prevProgress = prevTask ? progressMap.get(prevTask.id) : null;
+      const prevSubmission = prevTask ? submissionMap.get(prevTask.id) : null;
+      const isPrecedingTaskApproved =
+        task.taskNumber === 1
+          ? isLevelUnlocked
+          : (!prevTask || prevProgress?.status === 'APPROVED' || prevSubmission?.status === 'APPROVED' || previousTaskApproved);
+
       if (task.status === 'DISABLED') {
         userStatus = 'DISABLED';
       } else if (!isLevelUnlocked) {
         userStatus = 'LOCKED';
-      } else if (progress?.status === 'APPROVED') {
+      } else if (isApproved) {
         userStatus = 'APPROVED';
       } else if (submission?.status === 'PENDING' || progress?.status === 'PENDING_VERIFICATION') {
         userStatus = 'PENDING_VERIFICATION';
       } else if (progress?.status === 'REJECTED' || submission?.status === 'REJECTED') {
         userStatus = 'REJECTED';
-      } else if (task.taskNumber === 1 || previousTaskApproved) {
-        // Prerequisite is satisfied!
-        if (task.isPaid && !isPaidUnlocked) {
-          userStatus = 'AWAITING_PAYMENT';
-        } else if (task.isPaid && isPaidUnlocked) {
-          userStatus = 'UNLOCKED';
+      } else if (isPrecedingTaskApproved) {
+        // Prerequisite is satisfied! Task is open to be worked on / submitted
+        if (task.isPaid) {
+          // If the balance exists in account to complete the task, do NOT put any unlocking process!
+          // Give direct start / available option immediately!
+          const hasSufficientBalance = userBalance >= (task.unlockFee || 0);
+          if (hasSufficientBalance || isPaidUnlocked) {
+            userStatus = 'AVAILABLE';
+            isPaidUnlocked = true;
+          } else {
+            userStatus = 'AWAITING_PAYMENT';
+          }
         } else {
           userStatus = 'AVAILABLE';
         }
@@ -116,8 +147,8 @@ export const taskProgressionService = {
         userStatus = 'LOCKED';
       }
 
-      // Check if this task is approved so next task knows
-      previousTaskApproved = userStatus === 'APPROVED';
+      // Track approved status for next sequential task
+      previousTaskApproved = isApproved;
 
       // Mask sensitive content if user has not unlocked or reached the task
       const hasAccessToProtectedContent = ['UNLOCKED', 'AVAILABLE', 'IN_PROGRESS', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED'].includes(userStatus);

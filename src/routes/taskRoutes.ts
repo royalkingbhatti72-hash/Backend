@@ -5,6 +5,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { taskProgressionService } from '../services/taskProgressionService';
 import { ledgerService, InsufficientBalanceError } from '../services/ledgerService';
 import { affiliateService } from '../services/affiliateService';
+import { sendUserLiveCommand } from '../utils/supabase';
 
 const router = Router();
 
@@ -156,8 +157,8 @@ router.post('/:taskId/unlock', requireAuth, async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'This task is already completed and approved' });
     }
 
-    if (evaluated.isPaidUnlocked) {
-      return res.status(400).json({ error: 'This task is already unlocked' });
+    if (evaluated.userStatus === 'PENDING_VERIFICATION') {
+      return res.status(400).json({ error: 'This task has already been submitted and is currently under review by an administrator.' });
     }
 
     if (evaluated.userStatus === 'LOCKED') {
@@ -167,86 +168,84 @@ router.post('/:taskId/unlock', requireAuth, async (req: AuthRequest, res: Respon
     // Validate user wallet balance
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.availableBalance < task.unlockFee) {
+      const currentBal = wallet?.availableBalance || 0;
+      const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
       return res.status(400).json({
-        error: `Insufficient wallet balance. Required: PKR ${task.unlockFee.toLocaleString()}, Available: PKR ${wallet?.availableBalance.toLocaleString() || 0}. Please deposit funds to proceed.`,
+        error: `Insufficient account balance. This prepaid task requires a minimum balance of PKR ${task.unlockFee.toLocaleString()} (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance. Note: your funds remain in your account and will not be deducted.`,
         requiredAmount: task.unlockFee,
-        availableBalance: wallet?.availableBalance || 0,
+        availableBalance: currentBal,
+        remainingNeeded,
       });
     }
 
-    // Perform atomic transaction: deduct balance, create unlock record, update task progress
+    // Balance requirement verified!
+    // Directly submit review for the admin to approve the process!
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Debit wallet
-      await tx.wallet.update({
-        where: { userId },
-        data: {
-          availableBalance: { decrement: task.unlockFee },
-          totalUnlockFees: { increment: task.unlockFee },
-        },
-      });
-
-      // 2. Ledger transaction
-      const transaction = await tx.walletTransaction.create({
-        data: {
-          userId,
-          transactionType: 'TASK_UNLOCK_FEE',
-          amount: -task.unlockFee,
-          currency: 'PKR',
-          status: 'COMPLETED',
-          relatedEntityId: task.id,
-          reason: `Unlock fee for Level ${task.level.levelNumber} Task ${task.taskNumber}: ${task.title}`,
-        },
-      });
-
-      // 3. Task unlock transaction
+      // 1. Task unlock transaction record (0 fee deducted - requirement verified)
       const unlockTx = await tx.taskUnlockTransaction.create({
         data: {
           userId,
           taskId: task.id,
-          unlockFee: task.unlockFee,
-          transactionId: transaction.id,
+          unlockFee: 0,
           status: 'COMPLETED',
         },
       });
 
-      // 4. Update or create UserTaskProgress
+      // 2. Direct review submission for admin approval (no extra manual submit required)
+      const submission = await tx.taskSubmission.create({
+        data: {
+          userId,
+          taskId: task.id,
+          submissionNotes: `Prepaid task opened (Account balance requirement of PKR ${task.unlockFee.toLocaleString()} verified). Submitted directly for admin review.`,
+          proofEvidence: null,
+          status: 'PENDING',
+        },
+      });
+
+      // 3. Update or create UserTaskProgress to PENDING_VERIFICATION
       const progress = await tx.userTaskProgress.upsert({
         where: { userId_taskId: { userId, taskId: task.id } },
         update: {
-          status: 'UNLOCKED',
+          status: 'PENDING_VERIFICATION',
           isPaidUnlocked: true,
           unlockedAt: new Date(),
+          submissionAt: new Date(),
         },
         create: {
           userId,
           taskId: task.id,
-          status: 'UNLOCKED',
+          status: 'PENDING_VERIFICATION',
           isPaidUnlocked: true,
           unlockedAt: new Date(),
+          submissionAt: new Date(),
         },
       });
 
-      // 5. Notify user
+      // 4. Notify user
+      const rewardText = task.rewardAmount > 0 ? ` Upon admin approval, +PKR ${task.rewardAmount.toLocaleString()} reward will be directly credited to your account.` : '';
       await tx.notification.create({
         data: {
           userId,
-          title: `Task Unlocked: ${task.title} 🔓`,
-          message: `Unlock fee of PKR ${task.unlockFee.toLocaleString()} paid. Protected instructions and link are now active.`,
+          title: `Prepaid Task Submitted for Review ⏳`,
+          message: `Required account balance of PKR ${task.unlockFee.toLocaleString()} verified. Task "${task.title}" has been directly submitted for admin review and approval. Your funds remain in your wallet balance with zero deductions.${rewardText}`,
           notificationType: 'TASK_STATUS',
         },
       });
 
-      return { progress, unlockTx, transaction };
+      return { progress, unlockTx, submission };
     });
 
+    sendUserLiveCommand(userId, 'task', { taskId: task.id, status: 'PENDING_VERIFICATION' });
+    sendUserLiveCommand(userId, 'refresh', { type: 'TASK_SUBMITTED' });
+
     res.json({
-      message: `Task successfully unlocked! PKR ${task.unlockFee.toLocaleString()} deducted from your wallet.`,
+      message: `Prepaid task opened and submitted for admin review! An administrator will review and approve the task. Your funds remain in your account balance with zero deductions.`,
       task: {
         id: task.id,
         title: task.title,
         instructions: task.instructions,
         protectedUrl: task.protectedUrl,
-        userStatus: 'UNLOCKED',
+        userStatus: 'PENDING_VERIFICATION',
         isPaidUnlocked: true,
       },
     });
@@ -305,116 +304,10 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
     }
 
     if (evaluated.userStatus === 'AWAITING_PAYMENT') {
-      return res.status(403).json({ error: `Please pay the unlock fee of PKR ${task.unlockFee.toLocaleString()} first before submitting proof.` });
+      return res.status(403).json({ error: `This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to start. Please deposit funds to meet the requirement.` });
     }
 
-    // If task is a Prepaid/Paid task, it does NOT require manual admin review!
-    // Auto-approve instantly upon submission and award credit points immediately.
-    if (task.isPaid) {
-      const creditPointsToAdd = task.creditPoints || 30;
-
-      const submission = await prisma.$transaction(async (tx) => {
-        const sub = await tx.taskSubmission.create({
-          data: {
-            userId,
-            taskId: task.id,
-            submissionNotes: validated.submissionNotes,
-            proofEvidence: validated.proofEvidence || null,
-            status: 'APPROVED',
-            reviewerName: 'System (Auto-Verified Prepaid)',
-            reviewNotes: 'Prepaid assignment verified and instantly approved without manual review.',
-          },
-        });
-
-        await tx.userTaskProgress.upsert({
-          where: { userId_taskId: { userId, taskId: task.id } },
-          update: {
-            status: 'APPROVED',
-            approvedAt: new Date(),
-            submissionAt: new Date(),
-          },
-          create: {
-            userId,
-            taskId: task.id,
-            status: 'APPROVED',
-            approvedAt: new Date(),
-            submissionAt: new Date(),
-          },
-        });
-
-        // Credit points immediately
-        await tx.wallet.update({
-          where: { userId },
-          data: {
-            creditPoints: { increment: creditPointsToAdd },
-          },
-        });
-
-        // Notify user
-        await tx.notification.create({
-          data: {
-            userId,
-            title: `Prepaid Task Approved! +${creditPointsToAdd} Points 🎉`,
-            message: `Your prepaid task "${task.title}" has been automatically verified and approved! You earned +${creditPointsToAdd} credit points, and the next sequential task is now unlocked.`,
-            notificationType: 'TASK_STATUS',
-          },
-        });
-
-        // Task 3 and Task 7 Milestone Spin
-        if (task.taskNumber === 3 || task.taskNumber === 7) {
-          const milestoneReason = `Level ${task.level.levelNumber} Task ${task.taskNumber} Milestone Free Spin`;
-          const existingEntitlement = await tx.userSpinEntitlement.findFirst({
-            where: {
-              userId,
-              levelNumber: task.level.levelNumber,
-              taskNumber: task.taskNumber,
-            },
-          });
-
-          if (!existingEntitlement) {
-            await tx.userSpinEntitlement.create({
-              data: {
-                userId,
-                levelNumber: task.level.levelNumber,
-                taskNumber: task.taskNumber,
-                triggerReason: milestoneReason,
-                totalSpins: 1,
-                remainingSpins: 1,
-                isEligible: false,
-                requiresAdminReview: true,
-                adminReviewed: false,
-                assignedPrizeId: null,
-              },
-            });
-
-            await tx.notification.create({
-              data: {
-                userId,
-                title: `Task ${task.taskNumber} Milestone Spin Earned! 🎡`,
-                message: `Congratulations! Completing Task ${task.taskNumber} in Level ${task.level.levelNumber} earned you a Free Royal Spin!`,
-                notificationType: 'SPIN_REWARD',
-              },
-            });
-          }
-        }
-
-        return sub;
-      });
-
-      // Recalculate level completion (which awards level cash reward if all 10 tasks are approved)
-      await taskProgressionService.updateLevelProgress(userId, task.levelId);
-
-      // Check referral qualification for referrer
-      await affiliateService.checkAndQualifyReferral(userId, 'TASK_APPROVED');
-
-      return res.status(200).json({
-        message: `Prepaid task completed and instantly approved! +${creditPointsToAdd} Credit Points added. The next task is now available.`,
-        submission,
-        userStatus: 'APPROVED',
-      });
-    }
-
-    // Standard free tasks: Record submission and queue for manual admin verification
+    // Record submission and queue for manual admin verification and approval
     const submission = await prisma.$transaction(async (tx) => {
       const sub = await tx.taskSubmission.create({
         data: {
@@ -430,21 +323,24 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
         where: { userId_taskId: { userId, taskId: task.id } },
         update: {
           status: 'PENDING_VERIFICATION',
+          isPaidUnlocked: task.isPaid ? true : undefined,
           submissionAt: new Date(),
         },
         create: {
           userId,
           taskId: task.id,
           status: 'PENDING_VERIFICATION',
+          isPaidUnlocked: task.isPaid ? true : false,
           submissionAt: new Date(),
         },
       });
 
+      const rewardInfo = task.rewardAmount > 0 ? ` Upon approval, +PKR ${task.rewardAmount.toLocaleString()} reward will be credited directly to your account.` : '';
       await tx.notification.create({
         data: {
           userId,
           title: `Task Submitted: ${task.title} ⏳`,
-          message: 'Your submission has been queued for manual admin verification. You will be notified once reviewed.',
+          message: `Your submission has been queued for admin verification and approval. You will be notified once reviewed.${rewardInfo}`,
           notificationType: 'TASK_STATUS',
         },
       });
@@ -452,8 +348,11 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
       return sub;
     });
 
+    sendUserLiveCommand(userId, 'task', { taskId: task.id, taskNumber: task.taskNumber, status: 'PENDING_VERIFICATION' });
+    sendUserLiveCommand(userId, 'refresh', { type: 'TASK_SUBMITTED' });
+
     res.status(201).json({
-      message: 'Task submitted for review! Once approved by admin, the task will be completed and the next task will open.',
+      message: 'Task submitted for review! Once approved by admin, your reward will be added to your balance and the next task will open.',
       submission,
       userStatus: 'PENDING_VERIFICATION',
     });

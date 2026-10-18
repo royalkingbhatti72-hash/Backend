@@ -40,7 +40,7 @@ router.get('/instructions', requireAuth, async (req: AuthRequest, res: Response,
     const settingsMap = Object.fromEntries(settings.map((s) => [s.key, s.value]));
 
     res.json({
-      minDeposit: parseFloat(settingsMap.min_deposit || '500'),
+      minDeposit: 1,
       supportWhatsapp: settingsMap.support_whatsapp || '+92 300 1234567',
       methods: {
         EASYPAISA: {
@@ -97,12 +97,9 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
     const userId = req.user!.id;
     const validated = depositSchema.parse(req.body);
 
-    // Check minimum deposit setting
-    const minSetting = await prisma.siteSetting.findUnique({ where: { key: 'min_deposit' } });
-    const minDeposit = minSetting ? parseFloat(minSetting.value) : 500;
-
-    if (validated.amount < minDeposit) {
-      return res.status(400).json({ error: `Minimum deposit amount is PKR ${minDeposit.toLocaleString()}` });
+    // Deposit can be any amount (positive number >= 1)
+    if (validated.amount < 1) {
+      return res.status(400).json({ error: 'Deposit amount must be at least PKR 1' });
     }
 
     // Check if duplicate transaction reference already submitted

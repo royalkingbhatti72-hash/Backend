@@ -8,6 +8,7 @@ import { requireAdmin, AdminAuthRequest } from '../middleware/adminAuth';
 import { logAdminAction } from '../services/auditService';
 import { taskProgressionService } from '../services/taskProgressionService';
 import { affiliateService } from '../services/affiliateService';
+import { sendUserLiveCommand } from '../utils/supabase';
 
 const router = Router();
 
@@ -721,21 +722,47 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           },
         });
 
-        // Credit credit points for individual task entity (PKR reward is granted upon Level Completion)
+        // Credit credit points and PKR task reward directly to wallet upon approval
         const creditPointsToAdd = task.creditPoints || 5;
-        await tx.wallet.update({
+        const taskRewardToAdd = Number(task.rewardAmount || 0);
+
+        const walletUpdateData: any = {
+          creditPoints: { increment: creditPointsToAdd },
+        };
+        if (taskRewardToAdd > 0) {
+          walletUpdateData.availableBalance = { increment: taskRewardToAdd };
+          walletUpdateData.totalEarned = { increment: taskRewardToAdd };
+        }
+
+        const updatedWallet = await tx.wallet.update({
           where: { userId: user.id },
-          data: {
-            creditPoints: { increment: creditPointsToAdd },
-          },
+          data: walletUpdateData,
         });
 
+        if (taskRewardToAdd > 0) {
+          await tx.walletTransaction.create({
+            data: {
+              userId: user.id,
+              transactionType: 'TASK_REWARD',
+              amount: taskRewardToAdd,
+              currency: 'PKR',
+              status: 'COMPLETED',
+              relatedEntityId: task.id,
+              actorId: req.admin!.id,
+              actorName: req.admin!.username,
+              reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
+              notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet.availableBalance.toLocaleString()}`,
+            },
+          });
+        }
+
         // Notification
+        const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : '';
         await tx.notification.create({
           data: {
             userId: user.id,
-            title: `Task Approved! +${creditPointsToAdd} Credit Points 🎉`,
-            message: `Your task "${task.title}" was approved by administrator ${req.admin!.username}. You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
+            title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points 🎉`,
+            message: `Your task "${task.title}" was approved by administrator ${req.admin!.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ''} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
             notificationType: 'TASK_STATUS',
           },
         });
@@ -778,8 +805,10 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           }
         }
 
-        return updatedSub;
+        return { updatedSub, updatedWallet };
       });
+
+      const { updatedSub, updatedWallet } = result;
 
       // Update level progression and check for level completion
       await taskProgressionService.updateLevelProgress(user.id, task.levelId);
@@ -793,12 +822,25 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         action: 'TASK_SUBMISSION_APPROVED',
         entityType: 'TaskSubmission',
         entityId: submissionId,
-        newState: { status: 'APPROVED', rewardAmount: task.rewardAmount },
+        newState: {
+          status: 'APPROVED',
+          rewardAmount: task.rewardAmount,
+          creditPoints: task.creditPoints || 5,
+          newBalance: updatedWallet.availableBalance,
+        },
         reason: reviewNotes,
         ipAddress: req.ip,
       });
 
-      res.json({ message: 'Task approved and reward credited successfully!', submission: result });
+      sendUserLiveCommand(user.id, 'wallet', {
+        availableBalance: updatedWallet.availableBalance,
+        totalEarned: updatedWallet.totalEarned,
+        creditPoints: updatedWallet.creditPoints,
+      });
+      sendUserLiveCommand(user.id, 'task', { submissionId, taskId: task.id, status: 'APPROVED' });
+      sendUserLiveCommand(user.id, 'refresh', { type: 'TASK_APPROVED' });
+
+      res.json({ message: 'Task approved and reward credited successfully!', submission: updatedSub, wallet: updatedWallet });
     } else {
       // REJECT
       const updatedSub = await prisma.$transaction(async (tx) => {
@@ -979,6 +1021,12 @@ router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthReq
       // Check and qualify referral if qualification criteria is deposit-based
       await affiliateService.checkAndQualifyReferral(deposit.userId, 'DEPOSIT_APPROVED');
 
+      sendUserLiveCommand(deposit.userId, 'wallet', {
+        type: 'DEPOSIT_APPROVED',
+        depositId: deposit.id,
+        amount: deposit.amount,
+      });
+
       res.json({ message: `Deposit of PKR ${deposit.amount.toLocaleString()} approved and credited!`, deposit: result });
     } else {
       // REJECT
@@ -1014,6 +1062,11 @@ router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthReq
         newState: { status: 'REJECTED' },
         reason: reviewNotes,
         ipAddress: req.ip,
+      });
+
+      sendUserLiveCommand(deposit.userId, 'wallet', {
+        type: 'DEPOSIT_REJECTED',
+        depositId: deposit.id,
       });
 
       res.json({ message: 'Deposit request rejected.', deposit: updatedDep });
@@ -1367,6 +1420,8 @@ router.post('/spin/assign', requireAdmin, async (req: AdminAuthRequest, res: Res
       ipAddress: req.ip,
     });
 
+    sendUserLiveCommand(userId, 'spin', { totalSpins });
+
     res.status(201).json({ message: 'Spin entitlement assigned successfully!', entitlement });
   } catch (err) {
     next(err);
@@ -1411,6 +1466,8 @@ router.put('/spin/entitlements/:entitlementId/assign', requireAdmin, async (req:
       newState: { assignedPrize: prize.name, isEligible: true },
       ipAddress: req.ip,
     });
+
+    sendUserLiveCommand(entitlement.userId, 'spin', { entitlementId: entitlement.id, prize: prize.name });
 
     res.json({ message: `Prize ${prize.name} assigned and spin unlocked for ${entitlement.user.name}!`, entitlement });
   } catch (err) {
