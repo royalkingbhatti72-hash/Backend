@@ -65527,22 +65527,15 @@ var taskProgressionService = {
       } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
         userStatus = "REJECTED";
       } else if (isPrecedingTaskApproved) {
-        if (task.isPaid) {
-          const hasSufficientBalance = userBalance >= (task.unlockFee || 0);
-          if (hasSufficientBalance || isPaidUnlocked) {
-            userStatus = "AVAILABLE";
-            isPaidUnlocked = true;
-          } else {
-            userStatus = "AWAITING_PAYMENT";
-          }
-        } else {
-          userStatus = "AVAILABLE";
+        userStatus = "AVAILABLE";
+        if (task.isPaid && isPaidUnlocked) {
+          isPaidUnlocked = true;
         }
       } else {
         userStatus = "LOCKED";
       }
       previousTaskApproved = isApproved;
-      const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED"].includes(userStatus);
+      const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
       const isLocked = userStatus === "LOCKED";
       evaluatedTasks.push({
         id: task.id,
@@ -73987,10 +73980,11 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
       const currentBal = wallet?.availableBalance || 0;
       const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
       return res.status(400).json({
-        error: `Insufficient account balance. This prepaid task requires a minimum balance of PKR ${task.unlockFee.toLocaleString()} (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance. Note: your funds remain in your account and will not be deducted.`,
+        error: `Insufficient account balance. This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to submit for approval (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance.`,
         requiredAmount: task.unlockFee,
         availableBalance: currentBal,
-        remainingNeeded
+        remainingNeeded,
+        redirectToDeposit: true
       });
     }
     const result = await prisma.$transaction(async (tx) => {
@@ -74092,15 +74086,36 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "This task is locked" });
     }
-    if (evaluated.userStatus === "AWAITING_PAYMENT") {
-      return res.status(403).json({ error: `This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to start. Please deposit funds to meet the requirement.` });
+    if (task.isPaid) {
+      const wallet = await prisma.wallet.findUnique({ where: { userId } });
+      const currentBal = wallet?.availableBalance || 0;
+      if (currentBal < task.unlockFee) {
+        const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
+        return res.status(400).json({
+          error: `Insufficient account balance. This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to submit for approval (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance.`,
+          requiredAmount: task.unlockFee,
+          availableBalance: currentBal,
+          remainingNeeded,
+          redirectToDeposit: true
+        });
+      }
     }
     const submission = await prisma.$transaction(async (tx) => {
+      if (task.isPaid) {
+        await tx.taskUnlockTransaction.create({
+          data: {
+            userId,
+            taskId: task.id,
+            unlockFee: 0,
+            status: "COMPLETED"
+          }
+        });
+      }
       const sub = await tx.taskSubmission.create({
         data: {
           userId,
           taskId: task.id,
-          submissionNotes: validated.submissionNotes,
+          submissionNotes: validated.submissionNotes || (task.isPaid ? `Prepaid task submitted (Account balance requirement of PKR ${task.unlockFee.toLocaleString()} verified)` : "Task completed"),
           proofEvidence: validated.proofEvidence || null,
           status: "PENDING"
         }
@@ -74124,8 +74139,8 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
       await tx.notification.create({
         data: {
           userId,
-          title: `Task Submitted: ${task.title} \u23F3`,
-          message: `Your submission has been queued for admin verification and approval. You will be notified once reviewed.${rewardInfo}`,
+          title: task.isPaid ? `Prepaid Task Submitted for Review \u23F3` : `Task Submitted: ${task.title} \u23F3`,
+          message: task.isPaid ? `Required balance of PKR ${task.unlockFee.toLocaleString()} verified. Task "${task.title}" has been automatically submitted for admin review and approval. Your funds remain in your balance with zero deductions.${rewardInfo}` : `Your submission has been queued for admin verification and approval. You will be notified once reviewed.${rewardInfo}`,
           notificationType: "TASK_STATUS"
         }
       });
@@ -74134,7 +74149,7 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     sendUserLiveCommand(userId, "task", { taskId: task.id, taskNumber: task.taskNumber, status: "PENDING_VERIFICATION" });
     sendUserLiveCommand(userId, "refresh", { type: "TASK_SUBMITTED" });
     res.status(201).json({
-      message: "Task submitted for review! Once approved by admin, your reward will be added to your balance and the next task will open.",
+      message: task.isPaid ? `Prepaid task approved & submitted for review! Required account balance verified. Your funds remain in your balance, and +PKR ${task.rewardAmount.toLocaleString()} reward will be credited upon admin approval.` : "Task submitted for review! Once approved by admin, your reward will be added to your balance and the next task will open.",
       submission,
       userStatus: "PENDING_VERIFICATION"
     });

@@ -130,18 +130,9 @@ export const taskProgressionService = {
         userStatus = 'REJECTED';
       } else if (isPrecedingTaskApproved) {
         // Prerequisite is satisfied! Task is open to be worked on / submitted
-        if (task.isPaid) {
-          // If the balance exists in account to complete the task, do NOT put any unlocking process!
-          // Give direct start / available option immediately!
-          const hasSufficientBalance = userBalance >= (task.unlockFee || 0);
-          if (hasSufficientBalance || isPaidUnlocked) {
-            userStatus = 'AVAILABLE';
-            isPaidUnlocked = true;
-          } else {
-            userStatus = 'AWAITING_PAYMENT';
-          }
-        } else {
-          userStatus = 'AVAILABLE';
+        userStatus = 'AVAILABLE';
+        if (task.isPaid && isPaidUnlocked) {
+          isPaidUnlocked = true;
         }
       } else {
         userStatus = 'LOCKED';
@@ -150,8 +141,8 @@ export const taskProgressionService = {
       // Track approved status for next sequential task
       previousTaskApproved = isApproved;
 
-      // Mask sensitive content if user has not unlocked or reached the task
-      const hasAccessToProtectedContent = ['UNLOCKED', 'AVAILABLE', 'IN_PROGRESS', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED'].includes(userStatus);
+      // Mask sensitive content if user has not reached the task
+      const hasAccessToProtectedContent = ['UNLOCKED', 'AVAILABLE', 'IN_PROGRESS', 'PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'AWAITING_PAYMENT'].includes(userStatus);
 
       const isLocked = userStatus === 'LOCKED';
 
