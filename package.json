@@ -4,7 +4,7 @@
   "description": "Earn Sheet - Backend API Server",
   "type": "module",
   "scripts": {
-    "build": "prisma generate && esbuild src/serverless.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --external:@prisma/client",
+    "build": "prisma generate && esbuild src/serverless.ts --bundle --platform=node --target=node20 --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js --external:@prisma/client",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "prisma:generate": "prisma generate",
