@@ -35,9 +35,9 @@ npm run dev
 2. In **Project Settings** $\rightarrow$ **Deployment Protection**:
    * Set **Vercel Authentication** to **Disabled**.
 3. In **Project Settings** $\rightarrow$ **Environment Variables**, add:
-   * `DATABASE_URL`: `postgresql://postgres:[YOUR-PASSWORD]@db.ilrngvidbuenxfgsbpim.supabase.co:6543/postgres?pgbouncer=true&connection_limit=1`
-   * `DIRECT_URL`: `postgresql://postgres:[YOUR-PASSWORD]@db.ilrngvidbuenxfgsbpim.supabase.co:5432/postgres`
+   * `DATABASE_URL`: `postgresql://postgres.iwzonipiymbsspnyoszt:Password%407878IUGUI7868%25%24%23%5Eyius@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true`
+   * `DIRECT_URL`: `postgresql://postgres.iwzonipiymbsspnyoszt:Password%407878IUGUI7868%25%24%23%5Eyius@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`
    * `JWT_SECRET`: `royal-rewards-super-secret-jwt-key-2026`
    * `ADMIN_SECRET`: `royal-rewards-admin-secret-key-2026`
-   * `SUPABASE_URL`: `https://ilrngvidbuenxfgsbpim.supabase.co`
+   * `SUPABASE_URL`: `https://iwzonipiymbsspnyoszt.supabase.co`
    * `SUPABASE_ANON_KEY`: `sb_publishable_4EqCtWIiEIwm3ETQvxeOgA_fUcSKkiJ`
