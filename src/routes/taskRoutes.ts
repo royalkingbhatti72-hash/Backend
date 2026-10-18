@@ -268,10 +268,10 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
     const taskId = req.params.taskId as string;
 
     const schema = z.object({
-      submissionNotes: z.string().min(2, 'Submission notes or confirmation reference is required').max(1000),
+      submissionNotes: z.string().max(1000).optional().default('Task completed - submitted for review'),
       proofEvidence: z.string().optional().nullable(),
     });
-    const validated = schema.parse(req.body);
+    const validated = schema.parse(req.body || {});
 
     const task: any = await prisma.task.findUnique({
       where: { id: taskId },
@@ -453,7 +453,7 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
     });
 
     res.status(201).json({
-      message: 'Task submitted successfully for review! An administrator will verify your proof.',
+      message: 'Task submitted for review! Once approved by admin, the task will be completed and the next task will open.',
       submission,
       userStatus: 'PENDING_VERIFICATION',
     });
