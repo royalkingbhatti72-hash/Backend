@@ -3,8 +3,12 @@
 -- Copy and paste this ENTIRE file into your Supabase SQL Editor and click "RUN"
 --
 
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
+-- Reset public schema cleanly to prevent relation already exists errors
+DROP SCHEMA IF EXISTS "public" CASCADE;
+CREATE SCHEMA "public";
+GRANT ALL ON SCHEMA "public" TO postgres;
+GRANT ALL ON SCHEMA "public" TO public;
+COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 -- CreateTable
 CREATE TABLE "User" (
