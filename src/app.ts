@@ -36,6 +36,15 @@ export function createApp() {
     app.use(morgan('dev'));
   }
 
+  // Normalize Vercel rewritten URL from x-matched-path if present
+  app.use((req, res, next) => {
+    const matchedPath = req.headers['x-matched-path'] as string | undefined;
+    if (matchedPath && matchedPath !== '/api/index') {
+      req.url = matchedPath;
+    }
+    next();
+  });
+
   // API Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/user', userRoutes);

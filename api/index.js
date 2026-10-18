@@ -54331,6 +54331,13 @@ function createApp() {
   if (process.env.NODE_ENV !== "test") {
     app2.use((0, import_morgan.default)("dev"));
   }
+  app2.use((req, res, next) => {
+    const matchedPath = req.headers["x-matched-path"];
+    if (matchedPath && matchedPath !== "/api/index") {
+      req.url = matchedPath;
+    }
+    next();
+  });
   app2.use("/api/auth", authRoutes_default);
   app2.use("/api/user", userRoutes_default);
   app2.use("/api/tasks", taskRoutes_default);
