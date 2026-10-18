@@ -4,6 +4,7 @@
   "description": "Earn Sheet - Backend API Server",
   "type": "module",
   "scripts": {
+    "build": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "prisma:generate": "prisma generate",
