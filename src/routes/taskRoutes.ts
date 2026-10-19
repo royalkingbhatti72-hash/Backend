@@ -72,6 +72,13 @@ router.get('/levels/:levelNumber', requireAuth, async (req: AuthRequest, res: Re
     }
 
     const result = await taskProgressionService.getLevelTasksForUser(userId, levelNumber);
+    if (!result.isLevelUnlocked) {
+      return res.status(403).json({
+        error: `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`,
+        isLevelUnlocked: false,
+        tasks: [],
+      });
+    }
     res.json(result);
   } catch (err) {
     next(err);
@@ -97,10 +104,20 @@ router.get('/:taskId', requireAuth, async (req: AuthRequest, res: Response, next
     }
 
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
-    const evaluatedTask = tasks.find((t) => t.id === taskId);
+    if (!isLevelUnlocked) {
+      return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. You must complete previous levels first.` });
+    }
 
+    const evaluatedTask = tasks.find((t) => t.id === taskId);
     if (!evaluatedTask) {
       return res.status(404).json({ error: 'Task evaluation failed' });
+    }
+
+    if (evaluatedTask.userStatus === 'LOCKED') {
+      return res.status(403).json({
+        error: `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first before opening.`,
+        isLocked: true,
+      });
     }
 
     // Past submissions

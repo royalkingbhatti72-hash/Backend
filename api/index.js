@@ -65479,6 +65479,13 @@ var taskProgressionService = {
         isLevelUnlocked = approvedCount >= (prevLevel.requiredTaskCount || 10);
       }
     }
+    if (!isLevelUnlocked) {
+      return {
+        level,
+        tasks: [],
+        isLevelUnlocked: false
+      };
+    }
     const wallet = await prisma.wallet.findUnique({
       where: { userId },
       select: { availableBalance: true }
@@ -65541,22 +65548,22 @@ var taskProgressionService = {
         id: task.id,
         levelId: task.levelId,
         taskNumber: task.taskNumber,
-        title: task.title,
-        description: isLocked ? task.lockMessage || "Complete previous requirements to unlock this task." : task.description,
-        taskType: task.taskType,
+        title: isLocked ? `Task #${task.taskNumber}` : task.title,
+        description: isLocked ? "Complete previous task to unlock details." : task.description,
+        taskType: isLocked ? "Task" : task.taskType,
         rewardAmount: task.rewardAmount,
         creditPoints: task.creditPoints ?? 5,
-        isPaid: task.isPaid,
-        unlockFee: task.unlockFee,
+        isPaid: isLocked ? false : task.isPaid,
+        unlockFee: isLocked ? 0 : task.unlockFee,
         requiresAdminApproval: task.requiresAdminApproval,
         status: task.status,
         userStatus,
         isPaidUnlocked,
-        lockMessage: isLocked ? task.lockMessage || "Complete previous requirements to unlock this task." : "",
-        instructions: hasAccessToProtectedContent ? task.instructions : null,
-        protectedUrl: hasAccessToProtectedContent ? task.protectedUrl : null,
-        submissionInstructions: hasAccessToProtectedContent ? task.submissionInstructions : null,
-        externalContact: hasAccessToProtectedContent ? task.externalContact : null,
+        lockMessage: isLocked ? task.lockMessage || `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first.` : "",
+        instructions: hasAccessToProtectedContent && !isLocked ? task.instructions : null,
+        protectedUrl: hasAccessToProtectedContent && !isLocked ? task.protectedUrl : null,
+        submissionInstructions: hasAccessToProtectedContent && !isLocked ? task.submissionInstructions : null,
+        externalContact: hasAccessToProtectedContent && !isLocked ? task.externalContact : null,
         submission: submission || null
       });
     }
@@ -73909,6 +73916,13 @@ router3.get("/levels/:levelNumber", requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: "Valid standard level number between 1 and 10 is required" });
     }
     const result = await taskProgressionService.getLevelTasksForUser(userId, levelNumber);
+    if (!result.isLevelUnlocked) {
+      return res.status(403).json({
+        error: `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`,
+        isLevelUnlocked: false,
+        tasks: []
+      });
+    }
     res.json(result);
   } catch (err) {
     next(err);
@@ -73926,9 +73940,18 @@ router3.get("/:taskId", requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: "Task not found" });
     }
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
+    if (!isLevelUnlocked) {
+      return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. You must complete previous levels first.` });
+    }
     const evaluatedTask = tasks.find((t) => t.id === taskId);
     if (!evaluatedTask) {
       return res.status(404).json({ error: "Task evaluation failed" });
+    }
+    if (evaluatedTask.userStatus === "LOCKED") {
+      return res.status(403).json({
+        error: `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first before opening.`,
+        isLocked: true
+      });
     }
     const submissions = await prisma.taskSubmission.findMany({
       where: { userId, taskId },
@@ -74524,15 +74547,45 @@ router7.get("/status", requireAuth, async (req, res, next) => {
       pendingMilestone,
       wonProducts,
       isLevel10Completed: !!level10Progress,
-      prizes: prizes.map((p) => ({
-        id: p.id,
-        name: p.name,
-        displayLabel: p.displayLabel,
-        color: p.color,
-        icon: p.icon,
-        prizeType: p.prizeType,
-        monetaryValue: p.monetaryValue
-      })),
+      prizes: prizes.map((p) => {
+        let name = p.name;
+        let displayLabel = p.displayLabel;
+        let prizeType = p.prizeType;
+        let monetaryValue = p.monetaryValue;
+        let color = p.color;
+        let icon = p.icon;
+        if (name.includes("250") || displayLabel.includes("250") || name.toLowerCase().includes("alto")) {
+          name = "Suzuki Alto Car";
+          displayLabel = "Alto Car";
+          prizeType = "PHYSICAL";
+          monetaryValue = 25e5;
+          color = "#059669";
+          icon = "Car";
+        } else if (name.toLowerCase().includes("watch") || displayLabel.toLowerCase().includes("watch")) {
+          name = "Expensive Watch";
+          displayLabel = "Expensive Watch";
+          prizeType = "PHYSICAL";
+          monetaryValue = 45e3;
+          color = "#4F46E5";
+          icon = "Watch";
+        } else if (name.toLowerCase().includes("phone") || displayLabel.toLowerCase().includes("phone") || name.toLowerCase().includes("iphone")) {
+          name = "iPhone 15 Pro";
+          displayLabel = "iPhone 15 Pro";
+          prizeType = "PHYSICAL";
+          monetaryValue = 35e4;
+          color = "#EAB308";
+          icon = "Smartphone";
+        }
+        return {
+          id: p.id,
+          name,
+          displayLabel,
+          color,
+          icon,
+          prizeType,
+          monetaryValue
+        };
+      }),
       history
     });
   } catch (err) {
@@ -74570,7 +74623,7 @@ router7.post("/play", requireAuth, async (req, res, next) => {
         });
       }
       return res.status(403).json({
-        error: "You do not have any available spins. Earn free spins by completing Task 3 and Task 7 in each level!"
+        error: "You do not have any available spins. Complete levels or invite 3 friends in 24 hours to earn free spins!"
       });
     }
     const allActivePrizes = await prisma.spinPrize.findMany({

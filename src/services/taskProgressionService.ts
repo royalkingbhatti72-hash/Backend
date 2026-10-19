@@ -64,6 +64,15 @@ export const taskProgressionService = {
       }
     }
 
+    // If level is locked, hide all tasks completely
+    if (!isLevelUnlocked) {
+      return {
+        level,
+        tasks: [],
+        isLevelUnlocked: false,
+      };
+    }
+
     // Fetch user wallet balance to evaluate prepaid balance requirements
     const wallet = await prisma.wallet.findUnique({
       where: { userId },
@@ -150,22 +159,22 @@ export const taskProgressionService = {
         id: task.id,
         levelId: task.levelId,
         taskNumber: task.taskNumber,
-        title: task.title,
-        description: isLocked ? (task.lockMessage || 'Complete previous requirements to unlock this task.') : task.description,
-        taskType: task.taskType,
+        title: isLocked ? `Task #${task.taskNumber}` : task.title,
+        description: isLocked ? 'Complete previous task to unlock details.' : task.description,
+        taskType: isLocked ? 'Task' : task.taskType,
         rewardAmount: task.rewardAmount,
         creditPoints: (task as any).creditPoints ?? 5,
-        isPaid: task.isPaid,
-        unlockFee: task.unlockFee,
+        isPaid: isLocked ? false : task.isPaid,
+        unlockFee: isLocked ? 0 : task.unlockFee,
         requiresAdminApproval: task.requiresAdminApproval,
         status: task.status,
         userStatus,
         isPaidUnlocked,
-        lockMessage: isLocked ? (task.lockMessage || 'Complete previous requirements to unlock this task.') : '',
-        instructions: hasAccessToProtectedContent ? task.instructions : null,
-        protectedUrl: hasAccessToProtectedContent ? task.protectedUrl : null,
-        submissionInstructions: hasAccessToProtectedContent ? task.submissionInstructions : null,
-        externalContact: hasAccessToProtectedContent ? task.externalContact : null,
+        lockMessage: isLocked ? (task.lockMessage || `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first.`) : '',
+        instructions: hasAccessToProtectedContent && !isLocked ? task.instructions : null,
+        protectedUrl: hasAccessToProtectedContent && !isLocked ? task.protectedUrl : null,
+        submissionInstructions: hasAccessToProtectedContent && !isLocked ? task.submissionInstructions : null,
+        externalContact: hasAccessToProtectedContent && !isLocked ? task.externalContact : null,
         submission: submission || null,
       });
     }
