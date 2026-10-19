@@ -73,30 +73,28 @@ export const taskProgressionService = {
       };
     }
 
-    // Fetch user wallet balance to evaluate prepaid balance requirements
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId },
-      select: { availableBalance: true },
-    });
+    // Fetch wallet, task progress records, and submissions in parallel (single roundtrip)
+    const [wallet, userProgressRecords, submissions] = await Promise.all([
+      prisma.wallet.findUnique({
+        where: { userId },
+        select: { availableBalance: true },
+      }),
+      prisma.userTaskProgress.findMany({
+        where: {
+          userId,
+          task: { levelId: level.id },
+        },
+      }),
+      prisma.taskSubmission.findMany({
+        where: {
+          userId,
+          task: { levelId: level.id },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
     const userBalance = wallet?.availableBalance || 0;
-
-    // Fetch existing user task progress records for this level
-    const userProgressRecords = await prisma.userTaskProgress.findMany({
-      where: {
-        userId,
-        task: { levelId: level.id },
-      },
-    });
     const progressMap = new Map(userProgressRecords.map((p) => [p.taskId, p]));
-
-    // Fetch user submissions for this level (ordered latest first)
-    const submissions = await prisma.taskSubmission.findMany({
-      where: {
-        userId,
-        task: { levelId: level.id },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
     // Keep the latest submission per task
     const submissionMap = new Map<string, any>();
     for (const s of submissions) {

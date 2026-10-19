@@ -16,21 +16,26 @@ const router = Router();
 router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
     const userId = req.user!.id;
-    const levels = await prisma.level.findMany({
-      orderBy: { levelNumber: 'asc' },
-    });
+    const [levels, userProgress] = await Promise.all([
+      prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
+      prisma.userTaskProgress.findMany({
+        where: { userId, status: 'APPROVED' },
+        select: { task: { select: { levelId: true } } },
+      }),
+    ]);
+
+    const countByLevel = new Map<string, number>();
+    for (const p of userProgress) {
+      if (p.task?.levelId) {
+        countByLevel.set(p.task.levelId, (countByLevel.get(p.task.levelId) || 0) + 1);
+      }
+    }
 
     const levelsWithProgress = [];
     let previousLevelCompleted = true;
 
     for (const lvl of levels) {
-      const approvedCount = await prisma.userTaskProgress.count({
-        where: {
-          userId,
-          task: { levelId: lvl.id },
-          status: 'APPROVED',
-        },
-      });
+      const approvedCount = countByLevel.get(lvl.id) || 0;
 
       const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10);
       const isUnlocked = lvl.levelNumber === 1 || previousLevelCompleted;

@@ -26,11 +26,56 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Determine current active level for user
-    // A level is completed if all 10 tasks are approved.
-    const levels = await prisma.level.findMany({
-      orderBy: { levelNumber: 'asc' },
-    });
+    // Parallel batch query for ultra-fast performance (single network roundtrip)
+    const [
+      levels,
+      allApprovedProgress,
+      taskRewardTransactions,
+      referralCount,
+      entitlement,
+      unreadNotificationsCount,
+      recentTransactions,
+      recentSubmissions,
+      approvedSubmissions,
+    ] = await Promise.all([
+      prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
+      prisma.userTaskProgress.findMany({
+        where: { userId, status: 'APPROVED' },
+        select: { task: { select: { levelId: true } } },
+      }),
+      prisma.walletTransaction.aggregate({
+        where: { userId, transactionType: 'TASK_REWARD', status: 'COMPLETED' },
+        _sum: { amount: true },
+      }),
+      prisma.referral.count({ where: { referrerId: userId } }),
+      prisma.userSpinEntitlement.findFirst({
+        where: { userId, isEligible: true, remainingSpins: { gt: 0 } },
+      }),
+      prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.walletTransaction.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId },
+        include: { task: { select: { title: true, taskNumber: true, rewardAmount: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId, status: 'APPROVED' },
+        include: { task: { select: { isPaid: true, unlockFee: true, taskType: true, creditPoints: true } } },
+      }),
+    ]);
+
+    // Aggregate progress counts in-memory in 0ms
+    const countByLevel = new Map<string, number>();
+    for (const p of allApprovedProgress) {
+      if (p.task?.levelId) {
+        countByLevel.set(p.task.levelId, (countByLevel.get(p.task.levelId) || 0) + 1);
+      }
+    }
 
     let currentLevelNumber = 1;
     let currentLevelApprovedTasks = 0;
@@ -39,15 +84,8 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
     let foundActiveLevel = false;
 
     for (const lvl of levels) {
-      const approvedCount = await prisma.userTaskProgress.count({
-        where: {
-          userId,
-          task: { levelId: lvl.id },
-          status: 'APPROVED',
-        },
-      });
-
-      if (approvedCount >= 10) {
+      const approvedCount = countByLevel.get(lvl.id) || 0;
+      if (approvedCount >= (lvl.requiredTaskCount || 10)) {
         completedLevelsCount++;
       } else if (!foundActiveLevel) {
         currentLevelNumber = lvl.levelNumber;
@@ -56,84 +94,21 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       }
     }
 
-    if (!foundActiveLevel && completedLevelsCount >= 10) {
-      currentLevelNumber = 10;
+    if (!foundActiveLevel && completedLevelsCount >= levels.length) {
+      currentLevelNumber = levels.length || 10;
       currentLevelApprovedTasks = 10;
       isAllLevelsCompleted = true;
     }
 
     const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
-
-    // Global task counters
-    const totalApprovedTasksCount = await prisma.userTaskProgress.count({
-      where: { userId, status: 'APPROVED' },
-    });
+    const totalApprovedTasksCount = allApprovedProgress.length;
     const remainingTasksCount = Math.max(0, 100 - totalApprovedTasksCount);
-
-    // Sum of approved task rewards
-    const taskRewardTransactions = await prisma.walletTransaction.aggregate({
-      where: {
-        userId,
-        transactionType: 'TASK_REWARD',
-        status: 'COMPLETED',
-      },
-      _sum: { amount: true },
-    });
     const totalTaskRewardsApproved = taskRewardTransactions._sum.amount || 0;
 
-    // Referral count
-    const referralCount = await prisma.referral.count({
-      where: { referrerId: userId },
-    });
-
-    // Spin eligibility
-    const entitlement = await prisma.userSpinEntitlement.findFirst({
-      where: {
-        userId,
-        isEligible: true,
-        remainingSpins: { gt: 0 },
-      },
-    });
     const spinEligibility = {
       canSpin: !!entitlement,
       remainingSpins: entitlement?.remainingSpins || 0,
     };
-
-    // Unread notifications count
-    const unreadNotificationsCount = await prisma.notification.count({
-      where: { userId, isRead: false },
-    });
-
-    // Recent transactions (last 5)
-    const recentTransactions = await prisma.walletTransaction.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
-
-    // Recent activity (latest submissions, notifications, spins)
-    const recentSubmissions = await prisma.taskSubmission.findMany({
-      where: { userId },
-      include: {
-        task: {
-          select: { title: true, taskNumber: true, rewardAmount: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
-
-    // Credit points can ONLY and ONLY be earned from approved task completions:
-    // Standard tasks = 5 credit points each, Prepaid tasks = 30 credit points each (e.g., Level 1: 8 x 5 + 2 x 30 = 100 points).
-    // Any other source is removed, and wallet credit points are strictly synchronized to approved tasks.
-    const approvedSubmissions = await prisma.taskSubmission.findMany({
-      where: { userId, status: 'APPROVED' },
-      include: {
-        task: {
-          select: { isPaid: true, unlockFee: true, taskType: true, creditPoints: true },
-        },
-      },
-    });
 
     const calculatedCreditPoints = approvedSubmissions.reduce((sum, sub) => {
       const task = sub.task;
