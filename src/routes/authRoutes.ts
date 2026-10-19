@@ -15,7 +15,7 @@ const registerSchema = z.object({
   phone: z.string().min(10, 'Valid phone number is required').max(15),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   confirmPassword: z.string().min(6, 'Confirm password must be at least 6 characters'),
-  referralCode: z.string().optional().nullable(),
+  referralCode: z.string().min(1, 'Referral code is required. Registration is invite-only.'),
 }).refine((data) => data.password === data.confirmPassword, {
   message: 'Passwords do not match',
   path: ['confirmPassword'],
@@ -46,23 +46,25 @@ router.post('/register', async (req: Request, res: Response, next) => {
     const validated = registerSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
 
+    // Enforce referral code requirement
+    const trimmedRefCode = (validated.referralCode || '').trim().toUpperCase();
+    if (!trimmedRefCode) {
+      return res.status(400).json({ error: 'A valid referral code is required to register. Registration is invite-only.' });
+    }
+
+    const referrer = await prisma.user.findUnique({
+      where: { referralCode: trimmedRefCode },
+    });
+    if (!referrer) {
+      return res.status(400).json({ error: 'Invalid referral code provided. You must enter a valid inviter code to register.' });
+    }
+
     // Check unique phone
     const existingUser = await prisma.user.findUnique({
       where: { phone: normalizedPhone },
     });
     if (existingUser) {
       return res.status(400).json({ error: 'A user with this phone number is already registered' });
-    }
-
-    // Validate referral code if provided
-    let referrer = null;
-    if (validated.referralCode && validated.referralCode.trim()) {
-      referrer = await prisma.user.findUnique({
-        where: { referralCode: validated.referralCode.trim().toUpperCase() },
-      });
-      if (!referrer) {
-        return res.status(400).json({ error: 'Invalid referral code provided' });
-      }
     }
 
     // Generate unique referral code for new user

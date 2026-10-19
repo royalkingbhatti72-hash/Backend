@@ -65058,7 +65058,7 @@ var registerSchema = external_exports.object({
   phone: external_exports.string().min(10, "Valid phone number is required").max(15),
   password: external_exports.string().min(6, "Password must be at least 6 characters"),
   confirmPassword: external_exports.string().min(6, "Confirm password must be at least 6 characters"),
-  referralCode: external_exports.string().optional().nullable()
+  referralCode: external_exports.string().min(1, "Referral code is required. Registration is invite-only.")
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"]
@@ -65079,20 +65079,21 @@ router.post("/register", async (req, res, next) => {
   try {
     const validated = registerSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
+    const trimmedRefCode = (validated.referralCode || "").trim().toUpperCase();
+    if (!trimmedRefCode) {
+      return res.status(400).json({ error: "A valid referral code is required to register. Registration is invite-only." });
+    }
+    const referrer = await prisma.user.findUnique({
+      where: { referralCode: trimmedRefCode }
+    });
+    if (!referrer) {
+      return res.status(400).json({ error: "Invalid referral code provided. You must enter a valid inviter code to register." });
+    }
     const existingUser = await prisma.user.findUnique({
       where: { phone: normalizedPhone }
     });
     if (existingUser) {
       return res.status(400).json({ error: "A user with this phone number is already registered" });
-    }
-    let referrer = null;
-    if (validated.referralCode && validated.referralCode.trim()) {
-      referrer = await prisma.user.findUnique({
-        where: { referralCode: validated.referralCode.trim().toUpperCase() }
-      });
-      if (!referrer) {
-        return res.status(400).json({ error: "Invalid referral code provided" });
-      }
     }
     let userReferralCode = generateReferralCode(validated.name);
     let codeExists = await prisma.user.findUnique({ where: { referralCode: userReferralCode } });
