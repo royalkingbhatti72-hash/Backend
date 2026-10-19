@@ -72,13 +72,21 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
 
     const totalReferrals = referrals.length;
     const qualifiedReferrals = referrals.filter((r) => r.qualifyingStatus === 'QUALIFIED').length;
+    const spinsEarned = await prisma.userSpinEntitlement.count({
+      where: {
+        userId,
+        triggerReason: { contains: 'Referral' },
+      },
+    });
 
     res.json({
       referralCode: user.referralCode,
-      rewardPerReferral,
+      rewardPerReferral: 0,
+      rewardType: 'SPIN',
       totalReferrals,
       qualifiedReferrals,
-      totalEarned: referralEarnings._sum.amount || 0,
+      spinsEarned: spinsEarned || qualifiedReferrals,
+      totalEarned: 0,
       referrals: detailedReferrals,
     });
   } catch (err) {

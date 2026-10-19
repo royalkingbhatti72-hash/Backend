@@ -63,70 +63,64 @@ export const affiliateService = {
     const isInstant = settings.qualifyingCondition === 'INSTANT_ON_REGISTRATION';
 
     if (isInstant) {
-      // Qualify and payout immediately
+      // Qualify and award ONLY 1 Free Spin (no cash profit)
       await prisma.$transaction(async (tx) => {
         await tx.referral.upsert({
           where: { referrerId_referredId: { referrerId, referredId: refereeId } },
           update: {
             qualifyingStatus: 'QUALIFIED',
             rewardStatus: 'CREDITED',
-            rewardAmount: settings.referralReward,
+            rewardAmount: 0,
           },
           create: {
             referrerId,
             referredId: refereeId,
             qualifyingStatus: 'QUALIFIED',
             rewardStatus: 'CREDITED',
-            rewardAmount: settings.referralReward,
+            rewardAmount: 0,
           },
         });
 
-        await tx.wallet.update({
-          where: { userId: referrerId },
-          data: {
-            availableBalance: { increment: settings.referralReward },
-            totalEarned: { increment: settings.referralReward },
-          },
-        });
-
-        await tx.walletTransaction.create({
+        // Award 1 Free Spin to referrer
+        await tx.userSpinEntitlement.create({
           data: {
             userId: referrerId,
-            transactionType: 'REFERRAL_REWARD',
-            amount: settings.referralReward,
-            currency: 'PKR',
-            status: 'COMPLETED',
-            relatedEntityId: refereeId,
-            reason: `Referral commission for registering new partner`,
+            triggerReason: `Qualified Referral Reward (New Partner ${refereeId})`,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true,
           },
         });
 
         await tx.notification.create({
           data: {
             userId: referrerId,
-            title: `Referral Bonus Credited! +PKR ${settings.referralReward.toLocaleString()} 🎉`,
-            message: `A new partner registered with your code! PKR ${settings.referralReward.toLocaleString()} has been credited directly to your cash wallet balance.`,
-            notificationType: 'WALLET_TRANSACTION',
+            title: `Qualified Referral: 1 Free Spin Unlocked! 🎰`,
+            message: `A new partner registered with your code and qualified! You earned 1 Free Royal Spin.`,
+            notificationType: 'SPIN_REWARD',
           },
         });
       });
 
       await this.checkAmbassadorMilestones(referrerId);
     } else {
-      // Record referral relationship in PENDING state awaiting qualification event
+      // Record referral relationship in PENDING state awaiting qualification event.
+      // Unqualified users yield NO reward and 0 monetary profit.
       await prisma.referral.upsert({
-        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
+        where: { referrerId_referredId: { referrerId, refereeId } as any },
         update: {
           qualifyingStatus: 'PENDING',
           rewardStatus: 'PENDING',
-          rewardAmount: settings.referralReward,
+          rewardAmount: 0,
         },
         create: {
           referrerId,
           referredId: refereeId,
           qualifyingStatus: 'PENDING',
           rewardStatus: 'PENDING',
-          rewardAmount: settings.referralReward,
+          rewardAmount: 0,
         },
       });
     }
@@ -165,10 +159,9 @@ export const affiliateService = {
 
     if (!shouldQualify) return;
 
-    const rewardAmount = settings.referralReward || 250;
     const referrerId = referral.referrerId;
 
-    // Execute atomic qualification and wallet payout
+    // Execute atomic qualification and award ONLY 1 Free Spin (no cash profit)
     await prisma.$transaction(async (tx) => {
       // 1. Mark referral QUALIFIED and CREDITED
       await tx.referral.update({
@@ -176,39 +169,30 @@ export const affiliateService = {
         data: {
           qualifyingStatus: 'QUALIFIED',
           rewardStatus: 'CREDITED',
-          rewardAmount,
+          rewardAmount: 0,
         },
       });
 
-      // 2. Credit referrer's wallet
-      await tx.wallet.update({
-        where: { userId: referrerId },
-        data: {
-          availableBalance: { increment: rewardAmount },
-          totalEarned: { increment: rewardAmount },
-        },
-      });
-
-      // 3. Create wallet transaction
-      await tx.walletTransaction.create({
+      // 2. Award 1 Free Spin to referrer (no monetary wallet credit)
+      await tx.userSpinEntitlement.create({
         data: {
           userId: referrerId,
-          transactionType: 'REFERRAL_REWARD',
-          amount: rewardAmount,
-          currency: 'PKR',
-          status: 'COMPLETED',
-          relatedEntityId: referral.id,
-          reason: `Referral commission for qualifying partner (Criteria: ${settings.qualifyingCondition})`,
+          triggerReason: `Qualified Referral Reward (Partner ${referral.referredId})`,
+          totalSpins: 1,
+          remainingSpins: 1,
+          isEligible: true,
+          requiresAdminReview: false,
+          adminReviewed: true,
         },
       });
 
-      // 4. Send notification to referrer
+      // 3. Send notification to referrer
       await tx.notification.create({
         data: {
           userId: referrerId,
-          title: `Partner Qualified! +PKR ${rewardAmount.toLocaleString()} Credited 🎉`,
-          message: `Your referred partner has met the qualification criteria! PKR ${rewardAmount.toLocaleString()} has been credited to your available wallet balance.`,
-          notificationType: 'WALLET_TRANSACTION',
+          title: `Partner Qualified: 1 Free Spin Earned! 🎰`,
+          message: `Your referred partner has qualified! You have earned 1 Free Spin on the Lucky Wheel. Head over to the Spin page to play!`,
+          notificationType: 'SPIN_REWARD',
         },
       });
     });
@@ -263,46 +247,36 @@ export const affiliateService = {
       }
     }
 
-    // Milestone: Gold Ambassador reached (Award PKR 5,000 Milestone Bonus)
+    // Milestone: Gold Ambassador reached (Award 3 Free Milestone Spins - no cash bonus)
     if (qualifiedCount >= settings.goldTarget) {
-      const goldBonusReason = `Gold Ambassador Milestone Bonus (${settings.goldTarget} Qualified Partners)`;
-      const existingBonus = await prisma.walletTransaction.findFirst({
+      const goldSpinReason = `Gold Ambassador Milestone (${settings.goldTarget} Qualified Partners)`;
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId: referrerId,
-          reason: goldBonusReason,
+          triggerReason: goldSpinReason,
         },
       });
 
-      if (!existingBonus) {
-        await prisma.$transaction(async (tx) => {
-          const goldBonusAmount = 5000;
-          await tx.wallet.update({
-            where: { userId: referrerId },
-            data: {
-              availableBalance: { increment: goldBonusAmount },
-              totalEarned: { increment: goldBonusAmount },
-            },
-          });
+      if (!existingSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId: referrerId,
+            triggerReason: goldSpinReason,
+            totalSpins: 3,
+            remainingSpins: 3,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true,
+          },
+        });
 
-          await tx.walletTransaction.create({
-            data: {
-              userId: referrerId,
-              transactionType: 'REFERRAL_REWARD',
-              amount: goldBonusAmount,
-              currency: 'PKR',
-              status: 'COMPLETED',
-              reason: goldBonusReason,
-            },
-          });
-
-          await tx.notification.create({
-            data: {
-              userId: referrerId,
-              title: `Gold Ambassador Crowned! +PKR 5,000 Cash Bonus 👑`,
-              message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and a PKR 5,000 royal milestone reward!`,
-              notificationType: 'WALLET_TRANSACTION',
-            },
-          });
+        await prisma.notification.create({
+          data: {
+            userId: referrerId,
+            title: `Gold Ambassador Crowned! +3 Free Spins Awarded 👑`,
+            message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and 3 Free Royal Spins!`,
+            notificationType: 'SPIN_REWARD',
+          },
         });
       }
     }

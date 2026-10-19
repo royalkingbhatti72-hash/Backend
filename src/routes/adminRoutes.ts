@@ -723,7 +723,11 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         });
 
         // Credit credit points and PKR task reward directly to wallet upon approval
-        const creditPointsToAdd = task.creditPoints || 5;
+        // Prepaid tasks credit 30 credit points, standard tasks credit 5 credit points
+        const isPrepaidTask = Boolean(task.isPaid || (task.unlockFee && task.unlockFee > 0) || task.taskType?.toLowerCase().includes('prepaid'));
+        const creditPointsToAdd = isPrepaidTask
+          ? (task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30)
+          : (task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5);
         const taskRewardToAdd = Number(task.rewardAmount || 0);
 
         const walletUpdateData: any = {
@@ -825,7 +829,7 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         newState: {
           status: 'APPROVED',
           rewardAmount: task.rewardAmount,
-          creditPoints: task.creditPoints || 5,
+          creditPoints: creditPointsToAdd,
           newBalance: updatedWallet.availableBalance,
         },
         reason: reviewNotes,

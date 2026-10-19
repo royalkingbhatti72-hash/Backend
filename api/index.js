@@ -64872,58 +64872,51 @@ var affiliateService = {
           update: {
             qualifyingStatus: "QUALIFIED",
             rewardStatus: "CREDITED",
-            rewardAmount: settings.referralReward
+            rewardAmount: 0
           },
           create: {
             referrerId,
             referredId: refereeId,
             qualifyingStatus: "QUALIFIED",
             rewardStatus: "CREDITED",
-            rewardAmount: settings.referralReward
+            rewardAmount: 0
           }
         });
-        await tx.wallet.update({
-          where: { userId: referrerId },
-          data: {
-            availableBalance: { increment: settings.referralReward },
-            totalEarned: { increment: settings.referralReward }
-          }
-        });
-        await tx.walletTransaction.create({
+        await tx.userSpinEntitlement.create({
           data: {
             userId: referrerId,
-            transactionType: "REFERRAL_REWARD",
-            amount: settings.referralReward,
-            currency: "PKR",
-            status: "COMPLETED",
-            relatedEntityId: refereeId,
-            reason: `Referral commission for registering new partner`
+            triggerReason: `Qualified Referral Reward (New Partner ${refereeId})`,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true
           }
         });
         await tx.notification.create({
           data: {
             userId: referrerId,
-            title: `Referral Bonus Credited! +PKR ${settings.referralReward.toLocaleString()} \u{1F389}`,
-            message: `A new partner registered with your code! PKR ${settings.referralReward.toLocaleString()} has been credited directly to your cash wallet balance.`,
-            notificationType: "WALLET_TRANSACTION"
+            title: `Qualified Referral: 1 Free Spin Unlocked! \u{1F3B0}`,
+            message: `A new partner registered with your code and qualified! You earned 1 Free Royal Spin.`,
+            notificationType: "SPIN_REWARD"
           }
         });
       });
       await this.checkAmbassadorMilestones(referrerId);
     } else {
       await prisma.referral.upsert({
-        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
+        where: { referrerId_referredId: { referrerId, refereeId } },
         update: {
           qualifyingStatus: "PENDING",
           rewardStatus: "PENDING",
-          rewardAmount: settings.referralReward
+          rewardAmount: 0
         },
         create: {
           referrerId,
           referredId: refereeId,
           qualifyingStatus: "PENDING",
           rewardStatus: "PENDING",
-          rewardAmount: settings.referralReward
+          rewardAmount: 0
         }
       });
     }
@@ -64951,7 +64944,6 @@ var affiliateService = {
       shouldQualify = true;
     }
     if (!shouldQualify) return;
-    const rewardAmount = settings.referralReward || 250;
     const referrerId = referral.referrerId;
     await prisma.$transaction(async (tx) => {
       await tx.referral.update({
@@ -64959,33 +64951,26 @@ var affiliateService = {
         data: {
           qualifyingStatus: "QUALIFIED",
           rewardStatus: "CREDITED",
-          rewardAmount
+          rewardAmount: 0
         }
       });
-      await tx.wallet.update({
-        where: { userId: referrerId },
-        data: {
-          availableBalance: { increment: rewardAmount },
-          totalEarned: { increment: rewardAmount }
-        }
-      });
-      await tx.walletTransaction.create({
+      await tx.userSpinEntitlement.create({
         data: {
           userId: referrerId,
-          transactionType: "REFERRAL_REWARD",
-          amount: rewardAmount,
-          currency: "PKR",
-          status: "COMPLETED",
-          relatedEntityId: referral.id,
-          reason: `Referral commission for qualifying partner (Criteria: ${settings.qualifyingCondition})`
+          triggerReason: `Qualified Referral Reward (Partner ${referral.referredId})`,
+          totalSpins: 1,
+          remainingSpins: 1,
+          isEligible: true,
+          requiresAdminReview: false,
+          adminReviewed: true
         }
       });
       await tx.notification.create({
         data: {
           userId: referrerId,
-          title: `Partner Qualified! +PKR ${rewardAmount.toLocaleString()} Credited \u{1F389}`,
-          message: `Your referred partner has met the qualification criteria! PKR ${rewardAmount.toLocaleString()} has been credited to your available wallet balance.`,
-          notificationType: "WALLET_TRANSACTION"
+          title: `Partner Qualified: 1 Free Spin Earned! \u{1F3B0}`,
+          message: `Your referred partner has qualified! You have earned 1 Free Spin on the Lucky Wheel. Head over to the Spin page to play!`,
+          notificationType: "SPIN_REWARD"
         }
       });
     });
@@ -65034,41 +65019,32 @@ var affiliateService = {
       }
     }
     if (qualifiedCount >= settings.goldTarget) {
-      const goldBonusReason = `Gold Ambassador Milestone Bonus (${settings.goldTarget} Qualified Partners)`;
-      const existingBonus = await prisma.walletTransaction.findFirst({
+      const goldSpinReason = `Gold Ambassador Milestone (${settings.goldTarget} Qualified Partners)`;
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId: referrerId,
-          reason: goldBonusReason
+          triggerReason: goldSpinReason
         }
       });
-      if (!existingBonus) {
-        await prisma.$transaction(async (tx) => {
-          const goldBonusAmount = 5e3;
-          await tx.wallet.update({
-            where: { userId: referrerId },
-            data: {
-              availableBalance: { increment: goldBonusAmount },
-              totalEarned: { increment: goldBonusAmount }
-            }
-          });
-          await tx.walletTransaction.create({
-            data: {
-              userId: referrerId,
-              transactionType: "REFERRAL_REWARD",
-              amount: goldBonusAmount,
-              currency: "PKR",
-              status: "COMPLETED",
-              reason: goldBonusReason
-            }
-          });
-          await tx.notification.create({
-            data: {
-              userId: referrerId,
-              title: `Gold Ambassador Crowned! +PKR 5,000 Cash Bonus \u{1F451}`,
-              message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and a PKR 5,000 royal milestone reward!`,
-              notificationType: "WALLET_TRANSACTION"
-            }
-          });
+      if (!existingSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId: referrerId,
+            triggerReason: goldSpinReason,
+            totalSpins: 3,
+            remainingSpins: 3,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true
+          }
+        });
+        await prisma.notification.create({
+          data: {
+            userId: referrerId,
+            title: `Gold Ambassador Crowned! +3 Free Spins Awarded \u{1F451}`,
+            message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and 3 Free Royal Spins!`,
+            notificationType: "SPIN_REWARD"
+          }
         });
       }
     }
@@ -65334,15 +65310,28 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       orderBy: { createdAt: "desc" },
       take: 5
     });
-    let creditPoints = user.wallet?.creditPoints || 0;
-    const minCreditPoints = totalApprovedTasksCount * 10;
-    if (user.wallet && creditPoints < minCreditPoints) {
+    const approvedSubmissions = await prisma.taskSubmission.findMany({
+      where: { userId, status: "APPROVED" },
+      include: {
+        task: {
+          select: { isPaid: true, unlockFee: true, taskType: true, creditPoints: true }
+        }
+      }
+    });
+    const calculatedCreditPoints = approvedSubmissions.reduce((sum, sub) => {
+      const task = sub.task;
+      if (!task) return sum;
+      const isPrepaid = Boolean(task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid"));
+      const points = isPrepaid ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5;
+      return sum + points;
+    }, 0);
+    let creditPoints = calculatedCreditPoints;
+    if (user.wallet && user.wallet.creditPoints !== calculatedCreditPoints) {
       await prisma.wallet.update({
         where: { userId },
-        data: { creditPoints: minCreditPoints }
+        data: { creditPoints: calculatedCreditPoints }
       });
-      creditPoints = minCreditPoints;
-      user.wallet.creditPoints = minCreditPoints;
+      user.wallet.creditPoints = calculatedCreditPoints;
     }
     const eligiblePercent = Math.min(100, completedLevelsCount * 10);
     const availableBalance = user.wallet?.availableBalance || 0;
@@ -65552,7 +65541,7 @@ var taskProgressionService = {
         description: isLocked ? "Complete previous task to unlock details." : task.description,
         taskType: isLocked ? "Task" : task.taskType,
         rewardAmount: task.rewardAmount,
-        creditPoints: task.creditPoints ?? 5,
+        creditPoints: Boolean(task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")) ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
         isPaid: isLocked ? false : task.isPaid,
         unlockFee: isLocked ? 0 : task.unlockFee,
         requiresAdminApproval: task.requiresAdminApproval,
@@ -74754,12 +74743,20 @@ router8.get("/", requireAuth, async (req, res, next) => {
     });
     const totalReferrals = referrals.length;
     const qualifiedReferrals = referrals.filter((r) => r.qualifyingStatus === "QUALIFIED").length;
+    const spinsEarned = await prisma.userSpinEntitlement.count({
+      where: {
+        userId,
+        triggerReason: { contains: "Referral" }
+      }
+    });
     res.json({
       referralCode: user.referralCode,
-      rewardPerReferral,
+      rewardPerReferral: 0,
+      rewardType: "SPIN",
       totalReferrals,
       qualifiedReferrals,
-      totalEarned: referralEarnings._sum.amount || 0,
+      spinsEarned: spinsEarned || qualifiedReferrals,
+      totalEarned: 0,
       referrals: detailedReferrals
     });
   } catch (err) {
@@ -75540,10 +75537,11 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
             reviewerId: req.admin.id
           }
         });
-        const creditPointsToAdd = task.creditPoints || 5;
+        const isPrepaidTask = Boolean(task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid"));
+        const creditPointsToAdd2 = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5;
         const taskRewardToAdd = Number(task.rewardAmount || 0);
         const walletUpdateData = {
-          creditPoints: { increment: creditPointsToAdd }
+          creditPoints: { increment: creditPointsToAdd2 }
         };
         if (taskRewardToAdd > 0) {
           walletUpdateData.availableBalance = { increment: taskRewardToAdd };
@@ -75573,8 +75571,8 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
         await tx.notification.create({
           data: {
             userId: user.id,
-            title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points \u{1F389}`,
-            message: `Your task "${task.title}" was approved by administrator ${req.admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
+            title: `Task Approved!${rewardNotice} +${creditPointsToAdd2} Points \u{1F389}`,
+            message: `Your task "${task.title}" was approved by administrator ${req.admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd2} credit points! The next sequential task is now unlocked.`,
             notificationType: "TASK_STATUS"
           }
         });
@@ -75627,7 +75625,7 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
         newState: {
           status: "APPROVED",
           rewardAmount: task.rewardAmount,
-          creditPoints: task.creditPoints || 5,
+          creditPoints: creditPointsToAdd,
           newBalance: updatedWallet.availableBalance
         },
         reason: reviewNotes,

@@ -123,16 +123,35 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       take: 5,
     });
 
-    // Ensure credit points accurately reflect completed tasks (10 points each)
-    let creditPoints = user.wallet?.creditPoints || 0;
-    const minCreditPoints = totalApprovedTasksCount * 10;
-    if (user.wallet && creditPoints < minCreditPoints) {
+    // Credit points can ONLY and ONLY be earned from approved task completions:
+    // Standard tasks = 5 credit points each, Prepaid tasks = 30 credit points each (e.g., Level 1: 8 x 5 + 2 x 30 = 100 points).
+    // Any other source is removed, and wallet credit points are strictly synchronized to approved tasks.
+    const approvedSubmissions = await prisma.taskSubmission.findMany({
+      where: { userId, status: 'APPROVED' },
+      include: {
+        task: {
+          select: { isPaid: true, unlockFee: true, taskType: true, creditPoints: true },
+        },
+      },
+    });
+
+    const calculatedCreditPoints = approvedSubmissions.reduce((sum, sub) => {
+      const task = sub.task;
+      if (!task) return sum;
+      const isPrepaid = Boolean(task.isPaid || (task.unlockFee && task.unlockFee > 0) || task.taskType?.toLowerCase().includes('prepaid'));
+      const points = isPrepaid
+        ? (task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30)
+        : (task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5);
+      return sum + points;
+    }, 0);
+
+    let creditPoints = calculatedCreditPoints;
+    if (user.wallet && user.wallet.creditPoints !== calculatedCreditPoints) {
       await prisma.wallet.update({
         where: { userId },
-        data: { creditPoints: minCreditPoints },
+        data: { creditPoints: calculatedCreditPoints },
       });
-      creditPoints = minCreditPoints;
-      user.wallet.creditPoints = minCreditPoints;
+      user.wallet.creditPoints = calculatedCreditPoints;
     }
 
     const eligiblePercent = Math.min(100, completedLevelsCount * 10);
