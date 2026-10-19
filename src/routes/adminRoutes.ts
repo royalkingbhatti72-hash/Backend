@@ -705,6 +705,12 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           },
         });
 
+        // Check if task was ALREADY approved for this user before incrementing
+        const existingProgress = await tx.userTaskProgress.findUnique({
+          where: { userId_taskId: { userId: user.id, taskId: task.id } },
+        });
+        const wasAlreadyApproved = existingProgress?.status === 'APPROVED';
+
         // Update UserTaskProgress
         await tx.userTaskProgress.upsert({
           where: { userId_taskId: { userId: user.id, taskId: task.id } },
@@ -722,42 +728,66 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           },
         });
 
-        // Credit credit points and PKR task reward directly to wallet upon approval
-        // Prepaid tasks credit 30 credit points, standard tasks credit 5 credit points
-        const isPrepaidTask = Boolean(task.isPaid || (task.unlockFee && task.unlockFee > 0) || task.taskType?.toLowerCase().includes('prepaid'));
-        const creditPointsToAdd = isPrepaidTask
-          ? (task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30)
-          : (task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5);
-        const taskRewardToAdd = Number(task.rewardAmount || 0);
-
-        const walletUpdateData: any = {
-          creditPoints: { increment: creditPointsToAdd },
-        };
-        if (taskRewardToAdd > 0) {
-          walletUpdateData.availableBalance = { increment: taskRewardToAdd };
-          walletUpdateData.totalEarned = { increment: taskRewardToAdd };
-        }
-
-        const updatedWallet = await tx.wallet.update({
-          where: { userId: user.id },
-          data: walletUpdateData,
+        // Resolve any other pending submissions for this task
+        await tx.taskSubmission.updateMany({
+          where: {
+            userId: user.id,
+            taskId: task.id,
+            status: 'PENDING',
+            id: { not: submissionId },
+          },
+          data: {
+            status: 'APPROVED',
+            reviewerId: req.admin!.id,
+            reviewerName: req.admin!.username,
+            reviewNotes: 'Auto-resolved with task approval',
+          },
         });
 
-        if (taskRewardToAdd > 0) {
-          await tx.walletTransaction.create({
-            data: {
-              userId: user.id,
-              transactionType: 'TASK_REWARD',
-              amount: taskRewardToAdd,
-              currency: 'PKR',
-              status: 'COMPLETED',
-              relatedEntityId: task.id,
-              actorId: req.admin!.id,
-              actorName: req.admin!.username,
-              reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
-              notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet.availableBalance.toLocaleString()}`,
-            },
+        // Credit credit points and PKR task reward directly to wallet ONLY if not already approved
+        // Prepaid tasks (Task #5 & #10 or prepaid) credit exactly 30 credit points; standard tasks credit exactly 5
+        const isPrepaidTask = Boolean(
+          task.isPaid ||
+          (task.unlockFee && task.unlockFee > 0) ||
+          task.taskType?.toLowerCase().includes('prepaid') ||
+          task.taskNumber === 5 ||
+          task.taskNumber === 10
+        );
+        const creditPointsToAdd = isPrepaidTask ? 30 : 5;
+        const taskRewardToAdd = Number(task.rewardAmount || 0);
+
+        let updatedWallet: any = await tx.wallet.findUnique({ where: { userId: user.id } });
+
+        if (!wasAlreadyApproved) {
+          const walletUpdateData: any = {
+            creditPoints: { increment: creditPointsToAdd },
+          };
+          if (taskRewardToAdd > 0) {
+            walletUpdateData.availableBalance = { increment: taskRewardToAdd };
+            walletUpdateData.totalEarned = { increment: taskRewardToAdd };
+          }
+
+          updatedWallet = await tx.wallet.update({
+            where: { userId: user.id },
+            data: walletUpdateData,
           });
+
+          if (taskRewardToAdd > 0) {
+            await tx.walletTransaction.create({
+              data: {
+                userId: user.id,
+                transactionType: 'TASK_REWARD',
+                amount: taskRewardToAdd,
+                currency: 'PKR',
+                status: 'COMPLETED',
+                relatedEntityId: task.id,
+                actorId: req.admin!.id,
+                actorName: req.admin!.username,
+                reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
+                notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet.availableBalance.toLocaleString()}`,
+              },
+            });
+          }
         }
 
         // Notification

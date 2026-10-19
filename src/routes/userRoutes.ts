@@ -36,12 +36,23 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       unreadNotificationsCount,
       recentTransactions,
       recentSubmissions,
-      approvedSubmissions,
     ] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: 'APPROVED' },
-        select: { task: { select: { levelId: true } } },
+        select: {
+          task: {
+            select: {
+              id: true,
+              levelId: true,
+              taskNumber: true,
+              isPaid: true,
+              unlockFee: true,
+              taskType: true,
+              creditPoints: true,
+            },
+          },
+        },
       }),
       prisma.walletTransaction.aggregate({
         where: { userId, transactionType: 'TASK_REWARD', status: 'COMPLETED' },
@@ -62,10 +73,6 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
         include: { task: { select: { title: true, taskNumber: true, rewardAmount: true } } },
         orderBy: { createdAt: 'desc' },
         take: 5,
-      }),
-      prisma.taskSubmission.findMany({
-        where: { userId, status: 'APPROVED' },
-        include: { task: { select: { isPaid: true, unlockFee: true, taskType: true, creditPoints: true } } },
       }),
     ]);
 
@@ -110,13 +117,20 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       remainingSpins: entitlement?.remainingSpins || 0,
     };
 
-    const calculatedCreditPoints = approvedSubmissions.reduce((sum, sub) => {
-      const task = sub.task;
+    // Credit points earned STRICTLY and ONLY from distinct approved tasks (never double-counted)
+    // Task 1-4, 6-9: exactly 5 credit points
+    // Task 5, 10 (or prepaid): exactly 30 credit points
+    const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
+      const task = prog.task;
       if (!task) return sum;
-      const isPrepaid = Boolean(task.isPaid || (task.unlockFee && task.unlockFee > 0) || task.taskType?.toLowerCase().includes('prepaid'));
-      const points = isPrepaid
-        ? (task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30)
-        : (task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5);
+      const isPrepaid = Boolean(
+        task.isPaid ||
+        (task.unlockFee && task.unlockFee > 0) ||
+        task.taskType?.toLowerCase().includes('prepaid') ||
+        task.taskNumber === 5 ||
+        task.taskNumber === 10
+      );
+      const points = isPrepaid ? 30 : 5;
       return sum + points;
     }, 0);
 
