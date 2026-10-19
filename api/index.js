@@ -73993,7 +73993,7 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
           userId,
           taskId: task.id,
           unlockFee: 0,
-          transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
           status: "COMPLETED"
         }
       });
@@ -74108,7 +74108,7 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
             userId,
             taskId: task.id,
             unlockFee: 0,
-            transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             status: "COMPLETED"
           }
         });
