@@ -74246,35 +74246,45 @@ router5.get("/instructions", requireAuth, async (req, res, next) => {
             "bank_title",
             "bank_account",
             "bank_iban",
-            "support_whatsapp"
+            "support_whatsapp",
+            "support_telegram"
           ]
         }
       }
     });
     const settingsMap = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+    const easypaisaNumber = (settingsMap.easypaisa_number || "").trim();
+    const jazzcashNumber = (settingsMap.jazzcash_number || "").trim();
+    const bankAccount = (settingsMap.bank_account || "").trim();
+    const bankIban = (settingsMap.bank_iban || "").trim();
+    const supportTelegram = (settingsMap.support_telegram || "https://t.me/earnsheet_official").trim();
     res.json({
       minDeposit: 1,
-      supportWhatsapp: settingsMap.support_whatsapp || "+92 300 1234567",
+      supportWhatsapp: settingsMap.support_whatsapp || "",
+      supportTelegram,
       methods: {
         EASYPAISA: {
           name: "Easypaisa",
-          title: settingsMap.easypaisa_title || "Earn Sheet Official",
-          account: settingsMap.easypaisa_number || "0312-3456789",
-          instructions: "Send money to our official Easypaisa account and enter the 11-digit Trx ID below."
+          title: settingsMap.easypaisa_title?.trim() || "",
+          account: easypaisaNumber,
+          isAvailable: Boolean(easypaisaNumber),
+          instructions: easypaisaNumber ? "Send money to our official Easypaisa account and enter the 11-digit Trx ID below." : "Receiving account is currently unavailable. Please contact official support via Telegram."
         },
         JAZZCASH: {
           name: "JazzCash",
-          title: settingsMap.jazzcash_title || "Earn Sheet Official",
-          account: settingsMap.jazzcash_number || "0301-9876543",
-          instructions: "Transfer through JazzCash app or USSD and enter the Transaction ID / TID below."
+          title: settingsMap.jazzcash_title?.trim() || "",
+          account: jazzcashNumber,
+          isAvailable: Boolean(jazzcashNumber),
+          instructions: jazzcashNumber ? "Transfer through JazzCash app or USSD and enter the Transaction ID / TID below." : "Receiving account is currently unavailable. Please contact official support via Telegram."
         },
         BANK_TRANSFER: {
           name: "Bank Transfer",
-          bankName: settingsMap.bank_name || "Meezan Bank Limited",
-          title: settingsMap.bank_title || "Earn Sheet Enterprise PVT",
-          accountNumber: settingsMap.bank_account || "01020304050607",
-          iban: settingsMap.bank_iban || "PK12MEZN0001020304050607",
-          instructions: "Transfer via online banking or ATM and submit the reference number."
+          bankName: settingsMap.bank_name?.trim() || "",
+          title: settingsMap.bank_title?.trim() || "",
+          accountNumber: bankAccount,
+          iban: bankIban,
+          isAvailable: Boolean(bankAccount || bankIban),
+          instructions: bankAccount || bankIban ? "Transfer via online banking or ATM and submit the reference number." : "Receiving account is currently unavailable. Please contact official support via Telegram."
         }
       }
     });
@@ -74300,6 +74310,20 @@ router5.post("/", requireAuth, async (req, res, next) => {
     const validated = depositSchema.parse(req.body);
     if (validated.amount < 1) {
       return res.status(400).json({ error: "Deposit amount must be at least PKR 1" });
+    }
+    const methodSettingKey = validated.paymentMethod === "EASYPAISA" ? "easypaisa_number" : validated.paymentMethod === "JAZZCASH" ? "jazzcash_number" : "bank_account";
+    const accountSetting = await prisma.siteSetting.findUnique({
+      where: { key: methodSettingKey }
+    });
+    const telegramSetting = await prisma.siteSetting.findUnique({
+      where: { key: "support_telegram" }
+    });
+    const supportTelegram = telegramSetting?.value?.trim() || "https://t.me/earnsheet_official";
+    if (!accountSetting?.value || !accountSetting.value.trim()) {
+      return res.status(400).json({
+        error: `${validated.paymentMethod.replace(/_/g, " ")} account is currently unavailable. Please contact official support via Telegram to deposit.`,
+        supportTelegram
+      });
     }
     const existingRef = await prisma.depositRequest.findFirst({
       where: { transactionReference: validated.transactionReference.trim() }
@@ -74843,7 +74867,8 @@ router10.get("/public", async (req, res, next) => {
             "affiliate_bronze_target",
             "affiliate_silver_target",
             "affiliate_gold_target",
-            "affiliate_share_template"
+            "affiliate_share_template",
+            "support_telegram"
           ]
         }
       }
@@ -74853,6 +74878,7 @@ router10.get("/public", async (req, res, next) => {
       siteName: settingsMap.site_name || "Earn Sheet",
       supportEmail: settingsMap.support_email || "support@earnsheet.com",
       supportWhatsapp: settingsMap.support_whatsapp || "+92 300 1234567",
+      supportTelegram: settingsMap.support_telegram || "https://t.me/earnsheet_official",
       welcomeMessage: settingsMap.welcome_message || "Welcome to Earn Sheet!",
       currency: settingsMap.currency || "PKR",
       minDeposit: parseFloat(settingsMap.min_deposit || "500"),
