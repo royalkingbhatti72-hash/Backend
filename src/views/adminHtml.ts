@@ -1,22 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-
 export function getAdminSpaHtml(): string {
-  const possiblePaths = [
-    path.resolve(process.cwd(), 'backend/public/admin.html'),
-    path.resolve(process.cwd(), 'public/admin.html'),
-    path.resolve(__dirname, '../public/admin.html'),
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      try {
-        return fs.readFileSync(p, 'utf-8');
-      } catch {
-        // fallback
-      }
-    }
-  }
-
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
