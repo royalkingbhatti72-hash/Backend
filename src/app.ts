@@ -94,6 +94,20 @@ export function createApp() {
   app.use(express.static(publicDir));
   app.use(express.static(path.resolve(process.cwd(), 'public')));
 
+  // Graceful fallback for stale or missing assets
+  app.use('/assets', (req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (req.path.endsWith('.js')) {
+        return res.redirect(302, '/assets/main-BYm9MSrr.js');
+      }
+      if (req.path.endsWith('.css')) {
+        return res.redirect(302, '/assets/main-7C13EJw4.css');
+      }
+      return res.status(404).end();
+    }
+    next();
+  });
+
   // Serve the complete Royal Administration Portal SPA on any non-API GET or HEAD route
   app.use((req, res, next) => {
     if (
