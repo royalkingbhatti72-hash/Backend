@@ -16,28 +16,53 @@ const router = Router();
 router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
     const userId = req.user!.id;
-    const [levels, userProgress] = await Promise.all([
+    const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: 'APPROVED' },
-        select: { task: { select: { levelId: true } } },
+        select: { task: { select: { levelId: true, id: true } } },
+      }),
+      prisma.userLevelProgress.findMany({
+        where: { userId },
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId, status: 'APPROVED' },
+        select: { task: { select: { levelId: true, id: true } } },
       }),
     ]);
 
-    const countByLevel = new Map<string, number>();
+    const approvedTasksByLevel = new Map<string, Set<string>>();
     for (const p of userProgress) {
-      if (p.task?.levelId) {
-        countByLevel.set(p.task.levelId, (countByLevel.get(p.task.levelId) || 0) + 1);
+      if (p.task?.levelId && p.task?.id) {
+        if (!approvedTasksByLevel.has(p.task.levelId)) {
+          approvedTasksByLevel.set(p.task.levelId, new Set());
+        }
+        approvedTasksByLevel.get(p.task.levelId)!.add(p.task.id);
       }
+    }
+    for (const s of approvedSubmissions) {
+      if (s.task?.levelId && s.task?.id) {
+        if (!approvedTasksByLevel.has(s.task.levelId)) {
+          approvedTasksByLevel.set(s.task.levelId, new Set());
+        }
+        approvedTasksByLevel.get(s.task.levelId)!.add(s.task.id);
+      }
+    }
+
+    const levelProgressMap = new Map<string, any>();
+    for (const lp of userLevelProgressList) {
+      levelProgressMap.set(lp.levelId, lp);
     }
 
     const levelsWithProgress = [];
     let previousLevelCompleted = true;
 
     for (const lvl of levels) {
-      const approvedCount = countByLevel.get(lvl.id) || 0;
+      const taskSet = approvedTasksByLevel.get(lvl.id);
+      const lp = levelProgressMap.get(lvl.id);
+      const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
 
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10);
+      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
       const isUnlocked = lvl.levelNumber === 1 || previousLevelCompleted;
 
       levelsWithProgress.push({
