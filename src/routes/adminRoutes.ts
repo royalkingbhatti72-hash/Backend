@@ -762,6 +762,16 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
       // 3. Mark UserTaskProgress APPROVED
       // 4. Update Level Progress
       // 5. Notify user
+      const isPrepaidTask = Boolean(
+        task.isPaid ||
+        (task.unlockFee && task.unlockFee > 0) ||
+        task.taskType?.toLowerCase().includes('prepaid') ||
+        task.taskNumber === 5 ||
+        task.taskNumber === 10
+      );
+      const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : (isPrepaidTask ? 30 : 5));
+      const taskRewardToAdd = Number(task.rewardAmount || 0);
+
       const result = await prisma.$transaction(async (tx) => {
         // Update submission
         const updatedSub = await tx.taskSubmission.update({
@@ -814,17 +824,6 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         });
 
         // Credit credit points and PKR task reward directly to wallet ONLY if not already approved
-        // Prepaid tasks (Task #5 & #10 or prepaid) credit exactly 30 credit points; standard tasks credit exactly 5
-        const isPrepaidTask = Boolean(
-          task.isPaid ||
-          (task.unlockFee && task.unlockFee > 0) ||
-          task.taskType?.toLowerCase().includes('prepaid') ||
-          task.taskNumber === 5 ||
-          task.taskNumber === 10
-        );
-        const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : (isPrepaidTask ? 30 : 5));
-        const taskRewardToAdd = Number(task.rewardAmount || 0);
-
         let updatedWallet: any = await tx.wallet.findUnique({ where: { userId: user.id } });
 
         if (!wasAlreadyApproved) {

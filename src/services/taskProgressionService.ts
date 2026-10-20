@@ -104,7 +104,7 @@ export const taskProgressionService = {
     }
 
     const evaluatedTasks: EvaluatedTask[] = [];
-    let previousTaskApproved = isLevelUnlocked;
+    let previousTaskApproved: boolean = isLevelUnlocked;
 
     for (const task of level.tasks) {
       const progress = progressMap.get(task.id);

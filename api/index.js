@@ -75609,6 +75609,11 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
     }
     const { user, task } = submission;
     if (action === "APPROVE") {
+      const isPrepaidTask = Boolean(
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
+      );
+      const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : isPrepaidTask ? 30 : 5);
+      const taskRewardToAdd = Number(task.rewardAmount || 0);
       const result = await prisma.$transaction(async (tx) => {
         const updatedSub2 = await tx.taskSubmission.update({
           where: { id: submissionId },
@@ -75652,15 +75657,10 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
             reviewNotes: "Auto-resolved with task approval"
           }
         });
-        const isPrepaidTask = Boolean(
-          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
-        );
-        const creditPointsToAdd2 = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : isPrepaidTask ? 30 : 5);
-        const taskRewardToAdd = Number(task.rewardAmount || 0);
         let updatedWallet2 = await tx.wallet.findUnique({ where: { userId: user.id } });
         if (!wasAlreadyApproved) {
           const walletUpdateData = {
-            creditPoints: { increment: creditPointsToAdd2 }
+            creditPoints: { increment: creditPointsToAdd }
           };
           if (taskRewardToAdd > 0) {
             walletUpdateData.availableBalance = { increment: taskRewardToAdd };
@@ -75691,8 +75691,8 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
         await tx.notification.create({
           data: {
             userId: user.id,
-            title: `Task Approved!${rewardNotice} +${creditPointsToAdd2} Points \u{1F389}`,
-            message: `Your task "${task.title}" was approved by administrator ${req.admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd2} credit points! The next sequential task is now unlocked.`,
+            title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points \u{1F389}`,
+            message: `Your task "${task.title}" was approved by administrator ${req.admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
             notificationType: "TASK_STATUS"
           }
         });
