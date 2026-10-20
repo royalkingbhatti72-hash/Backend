@@ -75516,7 +75516,7 @@ router11.post("/users/:userId/adjust-balance", requireAdmin, async (req, res, ne
     const { amount, actionType, reason, notes } = external_exports.object({
       amount: external_exports.number().positive("Adjustment amount must be positive"),
       actionType: external_exports.enum(["CREDIT", "DEBIT"]),
-      reason: external_exports.string().min(3, "Audit reason is strictly required"),
+      reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Balance Adjustment"),
       notes: external_exports.string().optional()
     }).parse(req.body);
     const user = await prisma.user.findUnique({
@@ -75594,7 +75594,7 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
     const { points, actionType, reason, notes } = external_exports.object({
       points: external_exports.number().int().positive("Adjustment points must be a positive integer"),
       actionType: external_exports.enum(["ADD", "DEDUCT"]),
-      reason: external_exports.string().min(3, "Audit reason is strictly required"),
+      reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Credit Points Adjustment"),
       notes: external_exports.string().optional()
     }).parse(req.body);
     const user = await prisma.user.findUnique({
@@ -76797,7 +76797,7 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-OiNm05vr.js"></script>
+    <script type="module" crossorigin src="/assets/main-BIm59o1P.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/main-uiS9xK7W.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">

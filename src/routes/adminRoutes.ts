@@ -581,7 +581,10 @@ router.post('/users/:userId/adjust-balance', requireAdmin, async (req: AdminAuth
     const { amount, actionType, reason, notes } = z.object({
       amount: z.number().positive('Adjustment amount must be positive'),
       actionType: z.enum(['CREDIT', 'DEBIT']),
-      reason: z.string().min(3, 'Audit reason is strictly required'),
+      reason: z
+        .string()
+        .optional()
+        .transform((v) => (v && v.trim() ? v.trim() : 'Admin Balance Adjustment')),
       notes: z.string().optional(),
     }).parse(req.body);
 
@@ -671,7 +674,10 @@ router.post('/users/:userId/adjust-credit-points', requireAdmin, async (req: Adm
     const { points, actionType, reason, notes } = z.object({
       points: z.number().int().positive('Adjustment points must be a positive integer'),
       actionType: z.enum(['ADD', 'DEDUCT']),
-      reason: z.string().min(3, 'Audit reason is strictly required'),
+      reason: z
+        .string()
+        .optional()
+        .transform((v) => (v && v.trim() ? v.trim() : 'Admin Credit Points Adjustment')),
       notes: z.string().optional(),
     }).parse(req.body);
 
