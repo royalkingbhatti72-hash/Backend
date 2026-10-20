@@ -6,7 +6,7 @@ const router = Router();
 
 /**
  * GET /api/referrals
- * User referral dashboard details
+ * User referral details: client list with levels & spin progress
  */
 router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
@@ -18,17 +18,19 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Fetch referral reward setting
-    const rewardSetting = await prisma.siteSetting.findUnique({ where: { key: 'referral_reward' } });
-    const rewardPerReferral = rewardSetting ? parseFloat(rewardSetting.value) : 250;
+    // Fetch levels for progress mapping
+    const levels = await prisma.level.findMany({
+      orderBy: { levelNumber: 'asc' },
+      select: { id: true, levelNumber: true, title: true, requiredTaskCount: true },
+    });
 
-    // Fetch referred users
+    // Fetch user's referrals
     const referrals = await prisma.referral.findMany({
       where: { referrerId: userId },
       orderBy: { createdAt: 'desc' },
     });
 
-    // Fetch referred user details
+    // Fetch referred user details with their approved task progress
     const referredUserIds = referrals.map((r) => r.referredId);
     const referredUsers = await prisma.user.findMany({
       where: { id: { in: referredUserIds } },
@@ -38,40 +40,87 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         phone: true,
         accountStatus: true,
         createdAt: true,
+        taskProgress: {
+          where: { status: 'APPROVED' },
+          select: {
+            task: {
+              select: { levelId: true },
+            },
+          },
+        },
       },
     });
     const userMap = new Map(referredUsers.map((u) => [u.id, u]));
 
-    // Total referral earnings
-    const referralEarnings = await prisma.walletTransaction.aggregate({
-      where: {
-        userId,
-        transactionType: 'REFERRAL_REWARD',
-        status: 'COMPLETED',
-      },
-      _sum: { amount: true },
-    });
-
     const detailedReferrals = referrals.map((r) => {
       const referee = userMap.get(r.referredId);
-      // Mask referee phone for privacy (e.g. 0300****567)
       const maskedPhone = referee?.phone
         ? referee.phone.slice(0, 4) + '****' + referee.phone.slice(-3)
         : 'N/A';
+
+      // Compute referee's current level based on approved tasks
+      const countByLevel = new Map<string, number>();
+      if (referee?.taskProgress) {
+        for (const tp of referee.taskProgress) {
+          if (tp.task?.levelId) {
+            countByLevel.set(tp.task.levelId, (countByLevel.get(tp.task.levelId) || 0) + 1);
+          }
+        }
+      }
+
+      let currentLevelNumber = 1;
+      let currentLevelTitle = 'Level 1';
+      let tasksInCurrentLevel = 0;
+      let requiredTasksInCurrentLevel = 10;
+      let completedLevelsCount = 0;
+      let foundActive = false;
+
+      for (const lvl of levels) {
+        const approved = countByLevel.get(lvl.id) || 0;
+        const required = lvl.requiredTaskCount || 10;
+        if (approved >= required) {
+          completedLevelsCount++;
+        } else if (!foundActive) {
+          currentLevelNumber = lvl.levelNumber;
+          currentLevelTitle = `Level ${lvl.levelNumber}`;
+          tasksInCurrentLevel = approved;
+          requiredTasksInCurrentLevel = required;
+          foundActive = true;
+        }
+      }
+
+      if (!foundActive && completedLevelsCount >= levels.length && levels.length > 0) {
+        currentLevelNumber = levels.length;
+        currentLevelTitle = `Level ${levels.length} (Completed)`;
+        tasksInCurrentLevel = 10;
+        requiredTasksInCurrentLevel = 10;
+      }
+
+      const isLevel1Completed = completedLevelsCount >= 1;
+      const isQualified = r.qualifyingStatus === 'QUALIFIED' || isLevel1Completed;
 
       return {
         id: r.id,
         name: referee?.name || 'Referred Member',
         maskedPhone,
         registeredAt: referee?.createdAt || r.createdAt,
-        qualifyingStatus: r.qualifyingStatus,
-        rewardStatus: r.rewardStatus,
-        rewardAmount: r.rewardAmount,
+        currentLevelNumber,
+        currentLevelTitle,
+        tasksInCurrentLevel,
+        requiredTasksInCurrentLevel,
+        isLevel1Completed,
+        qualifyingStatus: isQualified ? 'QUALIFIED' : 'PENDING',
+        spinAwarded: isQualified,
+        spinStatusText: isQualified
+          ? 'Free Spin Unlocked 🎰'
+          : `Pending Level 1 (${tasksInCurrentLevel}/${requiredTasksInCurrentLevel} Tasks)`,
       };
     });
 
     const totalReferrals = referrals.length;
-    const qualifiedReferrals = referrals.filter((r) => r.qualifyingStatus === 'QUALIFIED').length;
+    const qualifiedReferrals = detailedReferrals.filter((r) => r.isLevel1Completed || r.qualifyingStatus === 'QUALIFIED').length;
+    const pendingReferrals = Math.max(0, totalReferrals - qualifiedReferrals);
+
     const spinsEarned = await prisma.userSpinEntitlement.count({
       where: {
         userId,
@@ -81,12 +130,11 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
 
     res.json({
       referralCode: user.referralCode,
-      rewardPerReferral: 0,
-      rewardType: 'SPIN',
       totalReferrals,
       qualifiedReferrals,
+      pendingReferrals,
       spinsEarned: spinsEarned || qualifiedReferrals,
-      totalEarned: 0,
+      spinRule: 'You earn 1 Free Lucky Spin when an invited friend completes Level 1.',
       referrals: detailedReferrals,
     });
   } catch (err) {
