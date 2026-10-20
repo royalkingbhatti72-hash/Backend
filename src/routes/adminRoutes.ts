@@ -259,6 +259,7 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
       walletBalance: u.wallet?.availableBalance || 0,
+      creditPoints: u.wallet?.creditPoints ?? 0,
       approvedTasksCount: u._count.taskProgress,
       referralsCount: u._count.referrals,
     }));
@@ -465,6 +466,74 @@ router.post('/users/:userId/adjust-balance', requireAdmin, async (req: AdminAuth
       message: `Successfully adjusted balance by ${actionType === 'CREDIT' ? '+' : '-'}PKR ${amount.toLocaleString()}`,
       wallet: result.wallet,
       transaction: result.transaction,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/users/:userId/adjust-credit-points', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const userId = req.params.userId as string;
+    const { points, actionType, reason, notes } = z.object({
+      points: z.number().int().positive('Adjustment points must be a positive integer'),
+      actionType: z.enum(['ADD', 'DEDUCT']),
+      reason: z.string().min(3, 'Audit reason is strictly required'),
+      notes: z.string().optional(),
+    }).parse(req.body);
+
+    const user: any = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { wallet: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const currentPoints = user.wallet?.creditPoints || 0;
+    if (actionType === 'DEDUCT' && currentPoints < points) {
+      return res.status(400).json({
+        error: `Cannot deduct ${points} credit points. Current balance is only ${currentPoints} CPs. Negative credit points are not allowed.`,
+      });
+    }
+
+    const finalPointsDelta = actionType === 'ADD' ? points : -points;
+    const newPoints = currentPoints + finalPointsDelta;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedWallet = await tx.wallet.update({
+        where: { userId },
+        data: {
+          creditPoints: newPoints,
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId,
+          title: `Credit Points Adjusted: ${actionType === 'ADD' ? '+' : '-'}${points} CPs 🎯`,
+          message: `Your credit points balance was adjusted by administration. Reason: ${reason}. New balance: ${newPoints} CPs.`,
+          notificationType: 'SYSTEM',
+        },
+      });
+
+      return { wallet: updatedWallet };
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: actionType === 'ADD' ? 'ADMIN_CREDIT_POINTS_ADD' : 'ADMIN_CREDIT_POINTS_DEDUCT',
+      entityType: 'Wallet',
+      entityId: result.wallet.id,
+      previousState: { creditPoints: currentPoints },
+      newState: { creditPoints: newPoints, adjustment: finalPointsDelta },
+      reason,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      message: `Successfully ${actionType === 'ADD' ? 'added' : 'deducted'} ${points} credit points. New balance: ${newPoints} CPs.`,
+      creditPoints: newPoints,
+      wallet: result.wallet,
     });
   } catch (err) {
     next(err);
@@ -753,7 +822,7 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           task.taskNumber === 5 ||
           task.taskNumber === 10
         );
-        const creditPointsToAdd = isPrepaidTask ? 30 : 5;
+        const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : (isPrepaidTask ? 30 : 5));
         const taskRewardToAdd = Number(task.rewardAmount || 0);
 
         let updatedWallet: any = await tx.wallet.findUnique({ where: { userId: user.id } });

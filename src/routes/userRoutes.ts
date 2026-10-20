@@ -117,30 +117,33 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       remainingSpins: entitlement?.remainingSpins || 0,
     };
 
-    // Credit points earned STRICTLY and ONLY from distinct approved tasks (never double-counted)
-    // Task 1-4, 6-9: exactly 5 credit points
-    // Task 5, 10 (or prepaid): exactly 30 credit points
-    const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
-      const task = prog.task;
-      if (!task) return sum;
-      const isPrepaid = Boolean(
-        task.isPaid ||
-        (task.unlockFee && task.unlockFee > 0) ||
-        task.taskType?.toLowerCase().includes('prepaid') ||
-        task.taskNumber === 5 ||
-        task.taskNumber === 10
-      );
-      const points = isPrepaid ? 30 : 5;
-      return sum + points;
-    }, 0);
+    // Credit points are sensitive and securely persisted in the database (wallet.creditPoints).
+    // Admin can manually add or decrease credit points from Admin Panel User Management.
+    // Tasks credit exact rewards upon approval. We preserve the stored database value.
+    let creditPoints = user.wallet?.creditPoints ?? 0;
+    if (creditPoints === 0 && allApprovedProgress.length > 0) {
+      const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
+        const task = prog.task;
+        if (!task) return sum;
+        const isPrepaid = Boolean(
+          task.isPaid ||
+          (task.unlockFee && task.unlockFee > 0) ||
+          task.taskType?.toLowerCase().includes('prepaid') ||
+          task.taskNumber === 5 ||
+          task.taskNumber === 10
+        );
+        const points = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : (isPrepaid ? 30 : 5));
+        return sum + points;
+      }, 0);
 
-    let creditPoints = calculatedCreditPoints;
-    if (user.wallet && user.wallet.creditPoints !== calculatedCreditPoints) {
-      await prisma.wallet.update({
-        where: { userId },
-        data: { creditPoints: calculatedCreditPoints },
-      });
-      user.wallet.creditPoints = calculatedCreditPoints;
+      if (calculatedCreditPoints > 0) {
+        await prisma.wallet.update({
+          where: { userId },
+          data: { creditPoints: calculatedCreditPoints },
+        });
+        creditPoints = calculatedCreditPoints;
+        if (user.wallet) user.wallet.creditPoints = calculatedCreditPoints;
+      }
     }
 
     // 10% of total balance upon completing Level 1 (and 10% on every level, not cumulative 20%)
