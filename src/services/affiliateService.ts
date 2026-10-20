@@ -109,7 +109,7 @@ export const affiliateService = {
       // Record referral relationship in PENDING state awaiting qualification event.
       // Unqualified users yield NO reward and 0 monetary profit.
       await prisma.referral.upsert({
-        where: { referrerId_referredId: { referrerId, refereeId } as any },
+        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
         update: {
           qualifyingStatus: 'PENDING',
           rewardStatus: 'PENDING',

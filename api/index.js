@@ -64905,7 +64905,7 @@ var affiliateService = {
       await this.checkAmbassadorMilestones(referrerId);
     } else {
       await prisma.referral.upsert({
-        where: { referrerId_referredId: { referrerId, refereeId } },
+        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
         update: {
           qualifyingStatus: "PENDING",
           rewardStatus: "PENDING",
