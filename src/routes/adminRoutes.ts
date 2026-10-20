@@ -330,12 +330,12 @@ router.get('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Re
           include: { task: { include: { level: true } } },
           orderBy: { createdAt: 'desc' },
         },
-        depositRequests: { orderBy: { createdAt: 'desc' }, take: 10 },
-        withdrawalRequests: { orderBy: { createdAt: 'desc' }, take: 10 },
-        transactions: { orderBy: { createdAt: 'desc' }, take: 20 },
+        depositRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+        withdrawalRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+        transactions: { orderBy: { createdAt: 'desc' }, take: 50 },
         spinEntitlements: { include: { assignedPrize: true } },
-        spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 10 },
-        submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 10 },
+        spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 50 },
+        submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 20 },
       },
     });
 
