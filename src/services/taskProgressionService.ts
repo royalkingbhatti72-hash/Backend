@@ -153,6 +153,14 @@ export const taskProgressionService = {
 
       const isLocked = userStatus === 'LOCKED';
 
+      const isPrepaidTask = Boolean(
+        task.isPaid ||
+        (task.unlockFee && task.unlockFee > 0) ||
+        task.taskNumber === 5 ||
+        task.taskNumber === 10 ||
+        task.taskType?.toLowerCase().includes('prepaid')
+      );
+
       evaluatedTasks.push({
         id: task.id,
         levelId: task.levelId,
@@ -161,7 +169,7 @@ export const taskProgressionService = {
         description: isLocked ? 'Complete previous task to unlock details.' : task.description,
         taskType: isLocked ? 'Task' : task.taskType,
         rewardAmount: task.rewardAmount,
-        creditPoints: Boolean(task.isPaid || (task.unlockFee && task.unlockFee > 0) || task.taskType?.toLowerCase().includes('prepaid'))
+        creditPoints: isPrepaidTask
           ? ((task as any).creditPoints && (task as any).creditPoints > 5 ? (task as any).creditPoints : 30)
           : ((task as any).creditPoints && (task as any).creditPoints > 0 ? (task as any).creditPoints : 5),
         isPaid: isLocked ? false : task.isPaid,

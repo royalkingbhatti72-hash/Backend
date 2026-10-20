@@ -976,7 +976,9 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         task.taskNumber === 5 ||
         task.taskNumber === 10
       );
-      const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : (isPrepaidTask ? 30 : 5));
+      const creditPointsToAdd = isPrepaidTask
+        ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)
+        : (task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5);
       const taskRewardToAdd = Number(task.rewardAmount || 0);
 
       const result = await prisma.$transaction(async (tx) => {

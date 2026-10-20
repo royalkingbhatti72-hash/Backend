@@ -65318,18 +65318,25 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       canSpin: !!entitlement,
       remainingSpins: entitlement?.remainingSpins || 0
     };
+    const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
+      const task = prog.task;
+      if (!task) return sum;
+      const isPrepaid = Boolean(
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
+      );
+      const points = isPrepaid ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
+      return sum + points;
+    }, 0);
     let creditPoints = user.wallet?.creditPoints ?? 0;
-    if (creditPoints === 0 && allApprovedProgress.length > 0) {
-      const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
-        const task = prog.task;
-        if (!task) return sum;
-        const isPrepaid = Boolean(
-          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
-        );
-        const points = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : isPrepaid ? 30 : 5);
-        return sum + points;
-      }, 0);
-      if (calculatedCreditPoints > 0) {
+    if (calculatedCreditPoints > creditPoints && allApprovedProgress.length > 0) {
+      const adminDeduction = await prisma.adminAuditLog.findFirst({
+        where: {
+          entityType: "Wallet",
+          entityId: user.wallet?.id,
+          action: "ADMIN_CREDIT_POINTS_DEDUCT"
+        }
+      });
+      if (!adminDeduction) {
         await prisma.wallet.update({
           where: { userId },
           data: { creditPoints: calculatedCreditPoints }
@@ -65540,6 +65547,9 @@ var taskProgressionService = {
       previousTaskApproved = isApproved;
       const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
       const isLocked = userStatus === "LOCKED";
+      const isPrepaidTask = Boolean(
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskType?.toLowerCase().includes("prepaid")
+      );
       evaluatedTasks.push({
         id: task.id,
         levelId: task.levelId,
@@ -65548,7 +65558,7 @@ var taskProgressionService = {
         description: isLocked ? "Complete previous task to unlock details." : task.description,
         taskType: isLocked ? "Task" : task.taskType,
         rewardAmount: task.rewardAmount,
-        creditPoints: Boolean(task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")) ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
+        creditPoints: isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
         isPaid: isLocked ? false : task.isPaid,
         unlockFee: isLocked ? 0 : task.unlockFee,
         requiresAdminApproval: task.requiresAdminApproval,
@@ -75860,7 +75870,7 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
       const isPrepaidTask = Boolean(
         task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
       );
-      const creditPointsToAdd = Number(task.creditPoints && task.creditPoints > 0 ? task.creditPoints : isPrepaidTask ? 30 : 5);
+      const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
       const taskRewardToAdd = Number(task.rewardAmount || 0);
       const result = await prisma.$transaction(async (tx) => {
         const updatedSub2 = await tx.taskSubmission.update({
