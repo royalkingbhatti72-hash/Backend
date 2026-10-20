@@ -4,7 +4,7 @@ export function getPortalHtml(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Earn Sheet • Production API & Services Gateway</title>
+  <title>Earn Street • Production API & Services Gateway</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -350,7 +350,7 @@ export function getPortalHtml(): string {
         <div class="logo-badge">
           <svg viewBox="0 0 24 24"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg>
         </div>
-        <div class="brand-title">EARN SHEET <span>API</span></div>
+        <div class="brand-title">EARN STREET <span>API</span></div>
       </a>
       <div class="status-pill">
         <span class="pulse-dot"></span>
@@ -470,7 +470,7 @@ export function getPortalHtml(): string {
     </div>
 
     <footer class="footer">
-      <p>Earn Sheet Platform API • Connected to Supabase Project <code>iwzonipiymbsspnyoszt</code></p>
+      <p>Earn Street Platform API • Connected to Supabase Project <code>iwzonipiymbsspnyoszt</code></p>
       <p style="margin-top: 6px;">Main App: <a href="https://rewardsheet.vercel.app">https://rewardsheet.vercel.app</a></p>
     </footer>
   </main>

@@ -44,7 +44,7 @@ export const affiliateService = {
       goldTarget: parseInt(map.affiliate_gold_target || '30', 10),
       shareTemplate:
         map.affiliate_share_template ||
-        '👑 Join Earn Sheet with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}',
+        '👑 Join Earn Street with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}',
       autoPayout: map.affiliate_auto_payout !== 'false',
       antiFraudEnabled: map.affiliate_anti_fraud !== 'false',
     };

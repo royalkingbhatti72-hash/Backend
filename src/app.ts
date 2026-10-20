@@ -67,7 +67,7 @@ export function createApp() {
   // Root & Health check endpoints
   app.get(['/api', '/api/index'], (req, res) => {
     res.json({
-      name: 'Earn Sheet API Server',
+      name: 'Earn Street API Server',
       status: 'online',
       message: 'Backend API server is running.',
       endpoints: {
@@ -78,7 +78,7 @@ export function createApp() {
   });
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', name: 'Earn Sheet API', timestamp: new Date() });
+    res.json({ status: 'ok', name: 'Earn Street API', timestamp: new Date() });
   });
 
   // Static assets for the Royal Administration Portal

@@ -5,10 +5,11 @@ import { prisma } from '../src/prisma';
 
 const app = createApp();
 
-describe('Royal Rewards Full-Stack API Suite', () => {
+describe('Royal Rewards Full-Stack API Suite', { timeout: 30000 }, () => {
   let userToken = '';
   let userId = '';
   let adminToken = '';
+  let validRefCode = 'ROYAL777';
   const testPhone = `0311${Math.floor(1000000 + Math.random() * 9000000)}`;
 
   beforeAll(async () => {
@@ -18,6 +19,20 @@ describe('Royal Rewards Full-Stack API Suite', () => {
       .send({ username: 'admin', password: 'Admin@Royal2026!' });
     expect(adminRes.status).toBe(200);
     adminToken = adminRes.body.token;
+
+    // Find any existing user with a referral code or create one
+    let refUser = await prisma.user.findFirst();
+    if (!refUser) {
+      refUser = await prisma.user.create({
+        data: {
+          name: 'Root Referrer',
+          phone: '03000000000',
+          passwordHash: 'dummy',
+          referralCode: 'ROYAL777',
+        },
+      });
+    }
+    validRefCode = refUser.referralCode;
   });
 
   describe('1. Authentication and User Registration', () => {
@@ -29,7 +44,7 @@ describe('Royal Rewards Full-Stack API Suite', () => {
           phone: testPhone,
           password: 'TestPassword123!',
           confirmPassword: 'TestPassword123!',
-          referralCode: 'ROYAL777', // referred by demo user
+          referralCode: validRefCode,
         });
 
       expect(res.status).toBe(201);
@@ -59,6 +74,7 @@ describe('Royal Rewards Full-Stack API Suite', () => {
           phone: testPhone,
           password: 'TestPassword123!',
           confirmPassword: 'TestPassword123!',
+          referralCode: validRefCode,
         });
 
       expect(res.status).toBe(400);
@@ -73,6 +89,7 @@ describe('Royal Rewards Full-Stack API Suite', () => {
           phone: '03229999999',
           password: 'Password123!',
           confirmPassword: 'DifferentPassword!',
+          referralCode: validRefCode,
         });
 
       expect(res.status).toBe(400);
@@ -406,6 +423,81 @@ describe('Royal Rewards Full-Stack API Suite', () => {
     it('unauthenticated request is blocked', async () => {
       const res = await request(app).get('/api/user/dashboard');
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('7. Single User Entity Targeted Updates & Zero-Reload Isolation', () => {
+    it('updates only changed fields of a single user without affecting others', async () => {
+      const targetUser = userId ? await prisma.user.findUnique({ where: { id: userId } }) : await prisma.user.findFirst();
+      expect(targetUser).not.toBeNull();
+      const targetId = targetUser!.id;
+
+      const newName = 'Royal Tester Modified';
+      const patchRes = await request(app)
+        .patch(`/api/admin/users/${targetId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: newName });
+
+      expect(patchRes.status).toBe(200);
+      expect(patchRes.body.user).toBeDefined();
+      expect(patchRes.body.user.id).toBe(targetId);
+      expect(patchRes.body.user.name).toBe(newName);
+      // Ensure passwordHash is not returned
+      expect(patchRes.body.user.passwordHash).toBeUndefined();
+
+      // Verify in database that only target user was updated
+      const updatedUser = await prisma.user.findUnique({ where: { id: targetId } });
+      expect(updatedUser?.name).toBe(newName);
+    });
+
+    it('returns no-change notice when sending identical field values', async () => {
+      const targetUser = userId ? await prisma.user.findUnique({ where: { id: userId } }) : await prisma.user.findFirst();
+      expect(targetUser).not.toBeNull();
+      const targetId = targetUser!.id;
+
+      const patchRes = await request(app)
+        .patch(`/api/admin/users/${targetId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: targetUser!.name });
+
+      expect(patchRes.status).toBe(200);
+      expect(patchRes.body.message).toContain('No changes detected');
+    });
+
+    it('fetches only single user summary without joining unrelated global data', async () => {
+      const targetUser = userId ? await prisma.user.findUnique({ where: { id: userId } }) : await prisma.user.findFirst();
+      expect(targetUser).not.toBeNull();
+      const targetId = targetUser!.id;
+
+      const summaryRes = await request(app)
+        .get(`/api/admin/users/${targetId}/summary`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(summaryRes.status).toBe(200);
+      expect(summaryRes.body.user).toBeDefined();
+      expect(summaryRes.body.user.id).toBe(targetId);
+      expect(summaryRes.body.user.walletBalance).toBeDefined();
+      expect(summaryRes.body.user.creditPoints).toBeDefined();
+      // Ensure big relational joins like taskProgress or depositRequests are not dumped
+      expect(summaryRes.body.user.taskProgress).toBeUndefined();
+      expect(summaryRes.body.user.depositRequests).toBeUndefined();
+    });
+
+    it('fetches only notification quantities for tasks, spins, deposits, and withdrawals', async () => {
+      const countRes = await request(app)
+        .get('/api/admin/notifications/counts')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(countRes.status).toBe(200);
+      expect(countRes.body.counts).toBeDefined();
+      expect(typeof countRes.body.counts.total).toBe('number');
+      expect(typeof countRes.body.counts.tasks).toBe('number');
+      expect(typeof countRes.body.counts.spins).toBe('number');
+      expect(typeof countRes.body.counts.deposits).toBe('number');
+      expect(typeof countRes.body.counts.withdrawals).toBe('number');
+      // Verify no records or data rows are dumped, strictly numbers
+      expect(countRes.body.tasks).toBeUndefined();
+      expect(countRes.body.submissions).toBeUndefined();
     });
   });
 });

@@ -127,7 +127,7 @@ router.post('/register', async (req: Request, res: Response, next) => {
     const token = jwt.sign({ userId: result.id }, config.jwtSecret, { expiresIn: '7d' });
 
     res.status(201).json({
-      message: 'Registration successful! Welcome to Earn Sheet.',
+      message: 'Registration successful! Welcome to Earn Street.',
       token,
       user: {
         id: result.id,

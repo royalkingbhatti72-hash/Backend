@@ -41,7 +41,7 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     }
 
     if (user.accountStatus === 'SUSPENDED') {
-      return res.status(403).json({ error: 'Account suspended. Please contact Earn Sheet support.' });
+      return res.status(403).json({ error: 'Account suspended. Please contact Earn Street support.' });
     }
 
     req.user = user;

@@ -72,6 +72,45 @@ router.get('/me', requireAdmin, (req: AdminAuthRequest, res: Response) => {
 });
 
 // ==========================================
+// 1.5 NOTIFICATIONS & PENDING QUANTITY COUNTS
+// ==========================================
+
+router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const [
+      pendingTasks,
+      pendingSpinsHistory,
+      pendingSpinsEntitlement,
+      pendingDeposits,
+      pendingWithdrawals,
+    ] = await Promise.all([
+      prisma.taskSubmission.count({ where: { status: 'PENDING' } }),
+      prisma.spinHistory.count({ where: { rewardStatus: 'PENDING' } }),
+      prisma.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
+      prisma.depositRequest.count({ where: { status: 'PENDING' } }),
+      prisma.withdrawalRequest.count({ where: { approvalStatus: 'PENDING' } }),
+    ]);
+
+    const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
+    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals;
+
+    res.json({
+      success: true,
+      counts: {
+        total,
+        tasks: pendingTasks,
+        submissions: pendingTasks,
+        spins: pendingSpins,
+        deposits: pendingDeposits,
+        withdrawals: pendingWithdrawals,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
 // 2. ADMIN DASHBOARD & SUMMARY
 // ==========================================
 
@@ -324,6 +363,14 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
     const updated = await prisma.user.update({
       where: { id: userId },
       data: { accountStatus: status },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        updatedAt: true,
+      },
     });
 
     await logAdminAction({
@@ -338,7 +385,145 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
       ipAddress: req.ip,
     });
 
+    // Notify user's active session without page reload
+    sendUserLiveCommand(userId, 'user_updated', { accountStatus: status });
+
     res.json({ message: `User status updated to ${status}`, user: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Update specific fields of a single user (only modified fields are sent and updated)
+router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const userId = req.params.userId as string;
+    const schema = z.object({
+      name: z.string().trim().min(2, 'Name must be at least 2 characters').optional(),
+      phone: z.string().trim().min(5, 'Phone must be at least 5 characters').optional(),
+      accountStatus: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
+      reason: z.string().optional(),
+    });
+    const parsed = schema.parse(req.body);
+    const { reason, ...fieldsToUpdate } = parsed;
+
+    if (Object.keys(fieldsToUpdate).length === 0) {
+      return res.status(400).json({ error: 'No fields provided to update' });
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true },
+    });
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Only include actually changed fields in the Prisma/database update
+    const updateData: Record<string, any> = {};
+    const changedFields: Record<string, any> = {};
+    const previousFields: Record<string, any> = {};
+
+    for (const [key, val] of Object.entries(fieldsToUpdate)) {
+      if (val !== undefined && (existingUser as any)[key] !== val) {
+        updateData[key] = val;
+        changedFields[key] = val;
+        previousFields[key] = (existingUser as any)[key];
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.json({
+        message: 'No changes detected. User profile is already up to date.',
+        user: existingUser,
+      });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'ADMIN_UPDATE_USER_FIELDS',
+      entityType: 'User',
+      entityId: userId,
+      previousState: previousFields,
+      newState: changedFields,
+      reason: reason || 'Admin updated user profile fields',
+      ipAddress: req.ip,
+    });
+
+    // Notify user's active session without page reload
+    sendUserLiveCommand(userId, 'user_updated', changedFields);
+
+    res.json({
+      message: 'User updated successfully',
+      user: updatedUser,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Fetch summary for a single user entity without reloading all users or unrelated data
+router.get('/users/:userId/summary', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const userId = req.params.userId as string;
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        referredById: true,
+        accountStatus: true,
+        createdAt: true,
+        wallet: {
+          select: {
+            availableBalance: true,
+            creditPoints: true,
+          },
+        },
+        _count: {
+          select: {
+            taskProgress: { where: { status: 'APPROVED' } },
+            referrals: true,
+          },
+        },
+      },
+    });
+
+    if (!u) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      user: {
+        id: u.id,
+        name: u.name,
+        phone: u.phone,
+        referralCode: u.referralCode,
+        referredById: u.referredById,
+        accountStatus: u.accountStatus,
+        createdAt: u.createdAt,
+        walletBalance: u.wallet?.availableBalance || 0,
+        creditPoints: u.wallet?.creditPoints ?? 0,
+        approvedTasksCount: u._count.taskProgress,
+        referralsCount: u._count.referrals,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -462,9 +647,17 @@ router.post('/users/:userId/adjust-balance', requireAdmin, async (req: AdminAuth
       ipAddress: req.ip,
     });
 
+    // Notify user's active session without page reload
+    sendUserLiveCommand(userId, 'wallet', { availableBalance: newBalance });
+
     res.json({
       message: `Successfully adjusted balance by ${actionType === 'CREDIT' ? '+' : '-'}PKR ${amount.toLocaleString()}`,
-      wallet: result.wallet,
+      wallet: {
+        id: result.wallet.id,
+        userId: result.wallet.userId,
+        availableBalance: result.wallet.availableBalance,
+        creditPoints: result.wallet.creditPoints,
+      },
       transaction: result.transaction,
     });
   } catch (err) {
@@ -530,10 +723,18 @@ router.post('/users/:userId/adjust-credit-points', requireAdmin, async (req: Adm
       ipAddress: req.ip,
     });
 
+    // Notify user's active session without page reload
+    sendUserLiveCommand(userId, 'wallet', { creditPoints: newPoints });
+
     res.json({
       message: `Successfully ${actionType === 'ADD' ? 'added' : 'deducted'} ${points} credit points. New balance: ${newPoints} CPs.`,
       creditPoints: newPoints,
-      wallet: result.wallet,
+      wallet: {
+        id: result.wallet.id,
+        userId: result.wallet.userId,
+        creditPoints: result.wallet.creditPoints,
+        availableBalance: result.wallet.availableBalance,
+      },
     });
   } catch (err) {
     next(err);

@@ -19,11 +19,22 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 export async function sendUserLiveCommand(userId: string, commandType: string, payload: any = {}) {
   try {
     const channel = supabase.channel(`royal_live_user_${userId}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'live_command',
-      payload: { targetUserId: userId, commandType, ...payload, timestamp: Date.now() },
-    });
+    const dataPayload = { targetUserId: userId, commandType, ...payload, timestamp: Date.now() };
+    if (typeof (channel as any).httpSend === 'function') {
+      await (channel as any).httpSend('live_command', dataPayload).catch(async () => {
+        await channel.send({
+          type: 'broadcast',
+          event: 'live_command',
+          payload: dataPayload,
+        });
+      });
+    } else {
+      await channel.send({
+        type: 'broadcast',
+        event: 'live_command',
+        payload: dataPayload,
+      });
+    }
     supabase.removeChannel(channel);
   } catch (err) {
     console.warn(`[Supabase Broadcast] Notice for user ${userId}:`, err);

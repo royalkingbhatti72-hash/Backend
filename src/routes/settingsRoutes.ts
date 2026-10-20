@@ -36,11 +36,11 @@ router.get('/public', async (req, res, next) => {
     const settingsMap = Object.fromEntries(settings.map((s) => [s.key, s.value]));
 
     res.json({
-      siteName: settingsMap.site_name || 'Earn Sheet',
+      siteName: settingsMap.site_name || 'Earn Street',
       supportEmail: settingsMap.support_email || 'support@earnsheet.com',
       supportWhatsapp: settingsMap.support_whatsapp || '+92 300 1234567',
       supportTelegram: settingsMap.support_telegram || 'https://t.me/earnsheet_official',
-      welcomeMessage: settingsMap.welcome_message || 'Welcome to Earn Sheet!',
+      welcomeMessage: settingsMap.welcome_message || 'Welcome to Earn Street!',
       currency: settingsMap.currency || 'PKR',
       minDeposit: parseFloat(settingsMap.min_deposit || '500'),
       minWithdrawal: parseFloat(settingsMap.min_withdrawal || '1000'),

@@ -64815,7 +64815,7 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ error: "Unauthorized: User no longer exists" });
     }
     if (user.accountStatus === "SUSPENDED") {
-      return res.status(403).json({ error: "Account suspended. Please contact Earn Sheet support." });
+      return res.status(403).json({ error: "Account suspended. Please contact Earn Street support." });
     }
     req.user = user;
     next();
@@ -64852,7 +64852,7 @@ var affiliateService = {
       bronzeTarget: parseInt(map2.affiliate_bronze_target || "5", 10),
       silverTarget: parseInt(map2.affiliate_silver_target || "15", 10),
       goldTarget: parseInt(map2.affiliate_gold_target || "30", 10),
-      shareTemplate: map2.affiliate_share_template || "\u{1F451} Join Earn Sheet with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}",
+      shareTemplate: map2.affiliate_share_template || "\u{1F451} Join Earn Street with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}",
       autoPayout: map2.affiliate_auto_payout !== "false",
       antiFraudEnabled: map2.affiliate_anti_fraud !== "false"
     };
@@ -65143,7 +65143,7 @@ router.post("/register", async (req, res, next) => {
     }
     const token = import_jsonwebtoken2.default.sign({ userId: result.id }, config2.jwtSecret, { expiresIn: "7d" });
     res.status(201).json({
-      message: "Registration successful! Welcome to Earn Sheet.",
+      message: "Registration successful! Welcome to Earn Street.",
       token,
       user: {
         id: result.id,
@@ -73853,11 +73853,22 @@ var supabase = createClient(supabaseUrl, supabaseKey);
 async function sendUserLiveCommand(userId, commandType, payload = {}) {
   try {
     const channel = supabase.channel(`royal_live_user_${userId}`);
-    await channel.send({
-      type: "broadcast",
-      event: "live_command",
-      payload: { targetUserId: userId, commandType, ...payload, timestamp: Date.now() }
-    });
+    const dataPayload = { targetUserId: userId, commandType, ...payload, timestamp: Date.now() };
+    if (typeof channel.httpSend === "function") {
+      await channel.httpSend("live_command", dataPayload).catch(async () => {
+        await channel.send({
+          type: "broadcast",
+          event: "live_command",
+          payload: dataPayload
+        });
+      });
+    } else {
+      await channel.send({
+        type: "broadcast",
+        event: "live_command",
+        payload: dataPayload
+      });
+    }
     supabase.removeChannel(channel);
   } catch (err) {
     console.warn(`[Supabase Broadcast] Notice for user ${userId}:`, err);
@@ -74930,11 +74941,11 @@ router10.get("/public", async (req, res, next) => {
     });
     const settingsMap = Object.fromEntries(settings.map((s) => [s.key, s.value]));
     res.json({
-      siteName: settingsMap.site_name || "Earn Sheet",
+      siteName: settingsMap.site_name || "Earn Street",
       supportEmail: settingsMap.support_email || "support@earnsheet.com",
       supportWhatsapp: settingsMap.support_whatsapp || "+92 300 1234567",
       supportTelegram: settingsMap.support_telegram || "https://t.me/earnsheet_official",
-      welcomeMessage: settingsMap.welcome_message || "Welcome to Earn Sheet!",
+      welcomeMessage: settingsMap.welcome_message || "Welcome to Earn Street!",
       currency: settingsMap.currency || "PKR",
       minDeposit: parseFloat(settingsMap.min_deposit || "500"),
       minWithdrawal: parseFloat(settingsMap.min_withdrawal || "1000"),
@@ -75057,6 +75068,38 @@ router11.post("/login", async (req, res, next) => {
 });
 router11.get("/me", requireAdmin, (req, res) => {
   res.json({ admin: req.admin });
+});
+router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (req, res, next) => {
+  try {
+    const [
+      pendingTasks,
+      pendingSpinsHistory,
+      pendingSpinsEntitlement,
+      pendingDeposits,
+      pendingWithdrawals
+    ] = await Promise.all([
+      prisma.taskSubmission.count({ where: { status: "PENDING" } }),
+      prisma.spinHistory.count({ where: { rewardStatus: "PENDING" } }),
+      prisma.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
+      prisma.depositRequest.count({ where: { status: "PENDING" } }),
+      prisma.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } })
+    ]);
+    const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
+    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals;
+    res.json({
+      success: true,
+      counts: {
+        total,
+        tasks: pendingTasks,
+        submissions: pendingTasks,
+        spins: pendingSpins,
+        deposits: pendingDeposits,
+        withdrawals: pendingWithdrawals
+      }
+    });
+  } catch (error62) {
+    next(error62);
+  }
 });
 router11.get("/dashboard", requireAdmin, async (req, res, next) => {
   try {
@@ -75282,7 +75325,15 @@ router11.put("/users/:userId/status", requireAdmin, async (req, res, next) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { accountStatus: status }
+      data: { accountStatus: status },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        updatedAt: true
+      }
     });
     await logAdminAction({
       adminId: req.admin.id,
@@ -75295,7 +75346,126 @@ router11.put("/users/:userId/status", requireAdmin, async (req, res, next) => {
       reason,
       ipAddress: req.ip
     });
+    sendUserLiveCommand(userId, "user_updated", { accountStatus: status });
     res.json({ message: `User status updated to ${status}`, user: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
+  try {
+    const userId = req.params.userId;
+    const schema = external_exports.object({
+      name: external_exports.string().trim().min(2, "Name must be at least 2 characters").optional(),
+      phone: external_exports.string().trim().min(5, "Phone must be at least 5 characters").optional(),
+      accountStatus: external_exports.enum(["ACTIVE", "SUSPENDED"]).optional(),
+      reason: external_exports.string().optional()
+    });
+    const parsed = schema.parse(req.body);
+    const { reason, ...fieldsToUpdate } = parsed;
+    if (Object.keys(fieldsToUpdate).length === 0) {
+      return res.status(400).json({ error: "No fields provided to update" });
+    }
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true }
+    });
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const updateData = {};
+    const changedFields = {};
+    const previousFields = {};
+    for (const [key, val] of Object.entries(fieldsToUpdate)) {
+      if (val !== void 0 && existingUser[key] !== val) {
+        updateData[key] = val;
+        changedFields[key] = val;
+        previousFields[key] = existingUser[key];
+      }
+    }
+    if (Object.keys(updateData).length === 0) {
+      return res.json({
+        message: "No changes detected. User profile is already up to date.",
+        user: existingUser
+      });
+    }
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        updatedAt: true
+      }
+    });
+    await logAdminAction({
+      adminId: req.admin.id,
+      adminUsername: req.admin.username,
+      action: "ADMIN_UPDATE_USER_FIELDS",
+      entityType: "User",
+      entityId: userId,
+      previousState: previousFields,
+      newState: changedFields,
+      reason: reason || "Admin updated user profile fields",
+      ipAddress: req.ip
+    });
+    sendUserLiveCommand(userId, "user_updated", changedFields);
+    res.json({
+      message: "User updated successfully",
+      user: updatedUser
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.get("/users/:userId/summary", requireAdmin, async (req, res, next) => {
+  try {
+    const userId = req.params.userId;
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        referredById: true,
+        accountStatus: true,
+        createdAt: true,
+        wallet: {
+          select: {
+            availableBalance: true,
+            creditPoints: true
+          }
+        },
+        _count: {
+          select: {
+            taskProgress: { where: { status: "APPROVED" } },
+            referrals: true
+          }
+        }
+      }
+    });
+    if (!u) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({
+      user: {
+        id: u.id,
+        name: u.name,
+        phone: u.phone,
+        referralCode: u.referralCode,
+        referredById: u.referredById,
+        accountStatus: u.accountStatus,
+        createdAt: u.createdAt,
+        walletBalance: u.wallet?.availableBalance || 0,
+        creditPoints: u.wallet?.creditPoints ?? 0,
+        approvedTasksCount: u._count.taskProgress,
+        referralsCount: u._count.referrals
+      }
+    });
   } catch (err) {
     next(err);
   }
@@ -75403,9 +75573,15 @@ router11.post("/users/:userId/adjust-balance", requireAdmin, async (req, res, ne
       reason,
       ipAddress: req.ip
     });
+    sendUserLiveCommand(userId, "wallet", { availableBalance: newBalance });
     res.json({
       message: `Successfully adjusted balance by ${actionType === "CREDIT" ? "+" : "-"}PKR ${amount.toLocaleString()}`,
-      wallet: result.wallet,
+      wallet: {
+        id: result.wallet.id,
+        userId: result.wallet.userId,
+        availableBalance: result.wallet.availableBalance,
+        creditPoints: result.wallet.creditPoints
+      },
       transaction: result.transaction
     });
   } catch (err) {
@@ -75462,10 +75638,16 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
       reason,
       ipAddress: req.ip
     });
+    sendUserLiveCommand(userId, "wallet", { creditPoints: newPoints });
     res.json({
       message: `Successfully ${actionType === "ADD" ? "added" : "deducted"} ${points} credit points. New balance: ${newPoints} CPs.`,
       creditPoints: newPoints,
-      wallet: result.wallet
+      wallet: {
+        id: result.wallet.id,
+        userId: result.wallet.userId,
+        creditPoints: result.wallet.creditPoints,
+        availableBalance: result.wallet.availableBalance
+      }
     });
   } catch (err) {
     next(err);
@@ -76609,14 +76791,14 @@ function getAdminSpaHtml() {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Earn Sheet \u2022 Royal Administration Portal</title>
-    <meta name="description" content="Earn Sheet Administration & Operations Management Portal" />
+    <title>Earn Street \u2022 Royal Administration Portal</title>
+    <meta name="description" content="Earn Street Administration & Operations Management Portal" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-BYCZgply.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-DQIpA072.css">
+    <script type="module" crossorigin src="/assets/main-DvFyuECm.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-DDfOs6Pw.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -76662,7 +76844,7 @@ function createApp() {
   app2.use("/api/admin", adminRoutes_default);
   app2.get(["/api", "/api/index"], (req, res) => {
     res.json({
-      name: "Earn Sheet API Server",
+      name: "Earn Street API Server",
       status: "online",
       message: "Backend API server is running.",
       endpoints: {
@@ -76672,7 +76854,7 @@ function createApp() {
     });
   });
   app2.get("/api/health", (req, res) => {
-    res.json({ status: "ok", name: "Earn Sheet API", timestamp: /* @__PURE__ */ new Date() });
+    res.json({ status: "ok", name: "Earn Street API", timestamp: /* @__PURE__ */ new Date() });
   });
   const publicDir = path.resolve(__dirname, "../public");
   const backendAssetsDir = path.resolve(__dirname, "../assets");
