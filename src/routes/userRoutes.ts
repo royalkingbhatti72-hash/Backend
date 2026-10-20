@@ -143,7 +143,8 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       user.wallet.creditPoints = calculatedCreditPoints;
     }
 
-    const eligiblePercent = Math.min(100, completedLevelsCount * 10);
+    // 10% of total balance upon completing Level 1 (and 10% on every level, not cumulative 20%)
+    const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
     const availableBalance = user.wallet?.availableBalance || 0;
     const maxWithdrawableAmount = Math.floor((availableBalance * eligiblePercent) / 100);
 

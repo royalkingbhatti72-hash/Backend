@@ -26,7 +26,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Calculate level progression and withdrawal limit
+    // Calculate level progression and withdrawal limit (10% of total balance on every completed level)
     const levels = await prisma.level.findMany({ orderBy: { levelNumber: 'asc' } });
     let completedLevelsCount = 0;
     for (const lvl of levels) {
@@ -35,7 +35,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       });
       if (approvedCount >= 10) completedLevelsCount++;
     }
-    const eligiblePercent = Math.min(100, completedLevelsCount * 10);
+    const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
     const availableBalance = wallet?.availableBalance || 0;
     const maxWithdrawableAmount = Math.floor((availableBalance * eligiblePercent) / 100);
@@ -71,7 +71,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       });
     }
 
-    // Calculate exact amount available for withdrawal
+    // Calculate exact amount available for withdrawal (10% of total account balance on every completed level)
     let exactAvailable = wallet.availableBalance;
     if (process.env.NODE_ENV !== 'test') {
       const allLevels = await prisma.level.findMany();
@@ -83,14 +83,14 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         if (approved >= 10) completedLevels++;
       }
 
-      const percent = Math.min(100, completedLevels * 10);
+      const percent = completedLevels >= 1 ? 10 : 0;
       if (percent <= 0 && completedLevels === 0) {
         return res.status(400).json({
-          error: 'Withdrawals unlock progressively per level. Complete all 10 tasks in Level 1 to unlock your withdrawal quota!',
+          error: 'Withdrawals unlock on level completion. Complete all 10 tasks in Level 1 to unlock your 10% account balance withdrawal quota!',
         });
       }
 
-      exactAvailable = percent > 0 ? Math.floor((wallet.availableBalance * percent) / 100) : wallet.availableBalance;
+      exactAvailable = Math.floor((wallet.availableBalance * percent) / 100);
     }
 
     if (exactAvailable <= 0) {
