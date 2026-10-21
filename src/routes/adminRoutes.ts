@@ -2047,14 +2047,26 @@ router.get('/settings', requireAdmin, async (req: AdminAuthRequest, res: Respons
 
 router.put('/settings', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
-    const { settings } = z.object({
-      settings: z.array(
-        z.object({
-          key: z.string(),
-          value: z.string(),
-        })
-      ),
-    }).parse(req.body);
+    let rawList: Array<{ key: string; value: any }> = [];
+
+    if (Array.isArray(req.body)) {
+      rawList = req.body;
+    } else if (req.body && Array.isArray(req.body.settings)) {
+      rawList = req.body.settings;
+    } else if (req.body && typeof req.body === 'object') {
+      rawList = Object.entries(req.body).map(([key, value]) => ({ key, value }));
+    }
+
+    if (!rawList.length) {
+      return res.status(400).json({ error: 'No settings provided to update' });
+    }
+
+    const settings = rawList
+      .filter((item) => item && typeof item.key === 'string' && item.key.trim() !== '')
+      .map((item) => ({
+        key: item.key.trim(),
+        value: item.value === null || item.value === undefined ? '' : String(item.value),
+      }));
 
     for (const item of settings) {
       await prisma.siteSetting.upsert({
@@ -2064,7 +2076,7 @@ router.put('/settings', requireAdmin, async (req: AdminAuthRequest, res: Respons
       });
     }
 
-    await logAdminAction({
+    logAdminAction({
       adminId: req.admin!.id,
       adminUsername: req.admin!.username,
       action: 'SITE_SETTINGS_UPDATED',
@@ -2072,7 +2084,7 @@ router.put('/settings', requireAdmin, async (req: AdminAuthRequest, res: Respons
       entityId: 'ALL',
       newState: settings,
       ipAddress: req.ip,
-    });
+    }).catch(() => {});
 
     res.json({ message: 'Site settings updated successfully' });
   } catch (err) {
