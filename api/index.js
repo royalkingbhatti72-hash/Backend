@@ -74172,15 +74172,17 @@ async function completeAndApproveTask(userId, task, submissionNotes, proofEviden
       }
     });
     if (rewardAmount > 0) {
-      await tx.transaction.create({
+      await tx.walletTransaction.create({
         data: {
           userId,
-          type: "TASK_REWARD",
+          transactionType: "TASK_REWARD",
           amount: rewardAmount,
-          balanceAfter: updatedWallet.availableBalance,
+          currency: "PKR",
           status: "COMPLETED",
-          description: `Reward for Level ${task.level.levelNumber} Task #${task.taskNumber}: ${task.title}`,
-          referenceId: `reward_${task.id}_${Date.now()}`
+          reason: `Reward for Level ${task.level.levelNumber} Task #${task.taskNumber}: ${task.title}`,
+          relatedEntityId: task.id,
+          actorId: "system",
+          actorName: "System"
         }
       });
     }
@@ -74197,22 +74199,24 @@ async function completeAndApproveTask(userId, task, submissionNotes, proofEviden
     if (isLevelComplete) {
       levelReward = task.level.completionReward || (task.level.levelNumber === 1 ? 500 : 0);
       if (levelReward > 0) {
-        const wAfterLvl = await tx.wallet.update({
+        await tx.wallet.update({
           where: { userId },
           data: {
             availableBalance: { increment: levelReward },
             totalEarned: { increment: levelReward }
           }
         });
-        await tx.transaction.create({
+        await tx.walletTransaction.create({
           data: {
             userId,
-            type: "LEVEL_REWARD",
+            transactionType: "LEVEL_REWARD",
             amount: levelReward,
-            balanceAfter: wAfterLvl.availableBalance,
+            currency: "PKR",
             status: "COMPLETED",
-            description: `Level ${task.level.levelNumber} completion bonus!`,
-            referenceId: `lvl_bonus_${task.level.id}_${Date.now()}`
+            reason: `Level ${task.level.levelNumber} completion bonus!`,
+            relatedEntityId: task.level.id,
+            actorId: "system",
+            actorName: "System"
           }
         });
       }
@@ -74433,9 +74437,9 @@ var walletRoutes_default = router4;
 var import_express5 = __toESM(require_express2(), 1);
 var router5 = (0, import_express5.Router)();
 var depositSchema = external_exports.object({
-  amount: external_exports.number().positive("Deposit amount must be greater than zero"),
+  amount: external_exports.coerce.number().positive("Deposit amount must be greater than zero"),
   paymentMethod: external_exports.enum(["EASYPAISA", "JAZZCASH", "BANK_TRANSFER"]),
-  transactionReference: external_exports.string().min(4, "Transaction ID / reference is required").max(100),
+  transactionReference: external_exports.string().min(1, "Transaction ID / reference is required").max(100),
   proofEvidence: external_exports.string().optional().nullable()
 });
 router5.get("/instructions", requireAuth, async (req, res, next) => {
@@ -74472,26 +74476,26 @@ router5.get("/instructions", requireAuth, async (req, res, next) => {
       methods: {
         EASYPAISA: {
           name: "Easypaisa",
-          title: settingsMap.easypaisa_title?.trim() || "",
+          title: settingsMap.easypaisa_title?.trim() || "Earn Sheet Official",
           account: easypaisaNumber,
-          isAvailable: Boolean(easypaisaNumber),
-          instructions: easypaisaNumber ? "Send money to our official Easypaisa account and enter the 11-digit Trx ID below." : "Receiving account is currently unavailable. Please contact official support via Telegram."
+          isAvailable: true,
+          instructions: easypaisaNumber ? "Send money to our official Easypaisa account and enter the 11-digit Trx ID below." : "Official receiving account allocated via Telegram support. Click Get Account above to receive verified details."
         },
         JAZZCASH: {
           name: "JazzCash",
-          title: settingsMap.jazzcash_title?.trim() || "",
+          title: settingsMap.jazzcash_title?.trim() || "Earn Sheet Official",
           account: jazzcashNumber,
-          isAvailable: Boolean(jazzcashNumber),
-          instructions: jazzcashNumber ? "Transfer through JazzCash app or USSD and enter the Transaction ID / TID below." : "Receiving account is currently unavailable. Please contact official support via Telegram."
+          isAvailable: true,
+          instructions: jazzcashNumber ? "Transfer through JazzCash app or USSD and enter the Transaction ID / TID below." : "Official receiving account allocated via Telegram support. Click Get Account above to receive verified details."
         },
         BANK_TRANSFER: {
           name: "Bank Transfer",
-          bankName: settingsMap.bank_name?.trim() || "",
-          title: settingsMap.bank_title?.trim() || "",
+          bankName: settingsMap.bank_name?.trim() || "Official Banking Channel",
+          title: settingsMap.bank_title?.trim() || "Earn Sheet Official",
           accountNumber: bankAccount,
           iban: bankIban,
-          isAvailable: Boolean(bankAccount || bankIban),
-          instructions: bankAccount || bankIban ? "Transfer via online banking or ATM and submit the reference number." : "Receiving account is currently unavailable. Please contact official support via Telegram."
+          isAvailable: true,
+          instructions: bankAccount || bankIban ? "Transfer via online banking or ATM and submit the reference number." : "Official receiving account allocated via Telegram support. Click Get Account above to receive verified details."
         }
       }
     });
@@ -74518,25 +74522,14 @@ router5.post("/", requireAuth, async (req, res, next) => {
     if (validated.amount < 1) {
       return res.status(400).json({ error: "Deposit amount must be at least PKR 1" });
     }
-    const methodSettingKey = validated.paymentMethod === "EASYPAISA" ? "easypaisa_number" : validated.paymentMethod === "JAZZCASH" ? "jazzcash_number" : "bank_account";
-    const accountSetting = await prisma.siteSetting.findUnique({
-      where: { key: methodSettingKey }
-    });
-    const telegramSetting = await prisma.siteSetting.findUnique({
-      where: { key: "support_telegram" }
-    });
-    const supportTelegram = telegramSetting?.value?.trim() || "https://t.me/earnsheet_official";
-    if (!accountSetting?.value || !accountSetting.value.trim()) {
-      return res.status(400).json({
-        error: `${validated.paymentMethod.replace(/_/g, " ")} account is currently unavailable. Please contact official support via Telegram to deposit.`,
-        supportTelegram
-      });
-    }
     const existingRef = await prisma.depositRequest.findFirst({
-      where: { transactionReference: validated.transactionReference.trim() }
+      where: {
+        transactionReference: validated.transactionReference.trim(),
+        status: { in: ["PENDING", "APPROVED"] }
+      }
     });
     if (existingRef) {
-      return res.status(400).json({ error: "This transaction reference ID has already been submitted" });
+      return res.status(400).json({ error: "This transaction reference ID has already been submitted and is currently pending or approved." });
     }
     const deposit = await prisma.$transaction(async (tx) => {
       const dep = await tx.depositRequest.create({
@@ -74553,7 +74546,7 @@ router5.post("/", requireAuth, async (req, res, next) => {
         data: {
           userId,
           title: `Deposit Submitted: PKR ${validated.amount.toLocaleString()} \u{1F4E5}`,
-          message: `Your deposit request via ${validated.paymentMethod} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
+          message: `Your deposit request via ${validated.paymentMethod.replace(/_/g, " ")} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
           notificationType: "DEPOSIT_STATUS"
         }
       });

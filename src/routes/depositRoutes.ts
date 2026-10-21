@@ -6,9 +6,9 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 const router = Router();
 
 const depositSchema = z.object({
-  amount: z.number().positive('Deposit amount must be greater than zero'),
+  amount: z.coerce.number().positive('Deposit amount must be greater than zero'),
   paymentMethod: z.enum(['EASYPAISA', 'JAZZCASH', 'BANK_TRANSFER']),
-  transactionReference: z.string().min(4, 'Transaction ID / reference is required').max(100),
+  transactionReference: z.string().min(1, 'Transaction ID / reference is required').max(100),
   proofEvidence: z.string().optional().nullable(),
 });
 
@@ -53,32 +53,32 @@ router.get('/instructions', requireAuth, async (req: AuthRequest, res: Response,
       methods: {
         EASYPAISA: {
           name: 'Easypaisa',
-          title: settingsMap.easypaisa_title?.trim() || '',
+          title: settingsMap.easypaisa_title?.trim() || 'Earn Sheet Official',
           account: easypaisaNumber,
-          isAvailable: Boolean(easypaisaNumber),
+          isAvailable: true,
           instructions: easypaisaNumber
             ? 'Send money to our official Easypaisa account and enter the 11-digit Trx ID below.'
-            : 'Receiving account is currently unavailable. Please contact official support via Telegram.',
+            : 'Official receiving account allocated via Telegram support. Click Get Account above to receive verified details.',
         },
         JAZZCASH: {
           name: 'JazzCash',
-          title: settingsMap.jazzcash_title?.trim() || '',
+          title: settingsMap.jazzcash_title?.trim() || 'Earn Sheet Official',
           account: jazzcashNumber,
-          isAvailable: Boolean(jazzcashNumber),
+          isAvailable: true,
           instructions: jazzcashNumber
             ? 'Transfer through JazzCash app or USSD and enter the Transaction ID / TID below.'
-            : 'Receiving account is currently unavailable. Please contact official support via Telegram.',
+            : 'Official receiving account allocated via Telegram support. Click Get Account above to receive verified details.',
         },
         BANK_TRANSFER: {
           name: 'Bank Transfer',
-          bankName: settingsMap.bank_name?.trim() || '',
-          title: settingsMap.bank_title?.trim() || '',
+          bankName: settingsMap.bank_name?.trim() || 'Official Banking Channel',
+          title: settingsMap.bank_title?.trim() || 'Earn Sheet Official',
           accountNumber: bankAccount,
           iban: bankIban,
-          isAvailable: Boolean(bankAccount || bankIban),
+          isAvailable: true,
           instructions: (bankAccount || bankIban)
             ? 'Transfer via online banking or ATM and submit the reference number.'
-            : 'Receiving account is currently unavailable. Please contact official support via Telegram.',
+            : 'Official receiving account allocated via Telegram support. Click Get Account above to receive verified details.',
         },
       },
     });
@@ -119,36 +119,15 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       return res.status(400).json({ error: 'Deposit amount must be at least PKR 1' });
     }
 
-    // Check if the selected method is currently configured/available in backend settings
-    const methodSettingKey =
-      validated.paymentMethod === 'EASYPAISA'
-        ? 'easypaisa_number'
-        : validated.paymentMethod === 'JAZZCASH'
-        ? 'jazzcash_number'
-        : 'bank_account';
-
-    const accountSetting = await prisma.siteSetting.findUnique({
-      where: { key: methodSettingKey },
-    });
-
-    const telegramSetting = await prisma.siteSetting.findUnique({
-      where: { key: 'support_telegram' },
-    });
-    const supportTelegram = telegramSetting?.value?.trim() || 'https://t.me/earnsheet_official';
-
-    if (!accountSetting?.value || !accountSetting.value.trim()) {
-      return res.status(400).json({
-        error: `${validated.paymentMethod.replace(/_/g, ' ')} account is currently unavailable. Please contact official support via Telegram to deposit.`,
-        supportTelegram,
-      });
-    }
-
     // Check if duplicate transaction reference already submitted
     const existingRef = await prisma.depositRequest.findFirst({
-      where: { transactionReference: validated.transactionReference.trim() },
+      where: {
+        transactionReference: validated.transactionReference.trim(),
+        status: { in: ['PENDING', 'APPROVED'] },
+      },
     });
     if (existingRef) {
-      return res.status(400).json({ error: 'This transaction reference ID has already been submitted' });
+      return res.status(400).json({ error: 'This transaction reference ID has already been submitted and is currently pending or approved.' });
     }
 
     const deposit = await prisma.$transaction(async (tx) => {
@@ -167,7 +146,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         data: {
           userId,
           title: `Deposit Submitted: PKR ${validated.amount.toLocaleString()} 📥`,
-          message: `Your deposit request via ${validated.paymentMethod} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
+          message: `Your deposit request via ${validated.paymentMethod.replace(/_/g, ' ')} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
           notificationType: 'DEPOSIT_STATUS',
         },
       });
