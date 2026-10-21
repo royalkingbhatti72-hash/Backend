@@ -77070,14 +77070,6 @@ function createApp() {
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "X-Api-Key"]
   }));
-  app2.options("*", (req, res) => {
-    const origin = req.headers.origin || "*";
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Api-Key");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.status(204).end();
-  });
   app2.use(import_express12.default.json());
   app2.use(import_express12.default.urlencoded({ extended: true }));
   if (process.env.NODE_ENV !== "test") {

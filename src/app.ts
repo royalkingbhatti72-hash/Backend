@@ -50,15 +50,7 @@ export function createApp() {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-Api-Key'],
   }));
 
-  // 3. Fallback explicit preflight router for all routes
-  app.options('*', (req, res) => {
-    const origin = (req.headers.origin as string) || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Api-Key');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.status(204).end();
-  });
+
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
