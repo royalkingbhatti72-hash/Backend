@@ -77028,12 +77028,11 @@ import fs from "fs";
 import path from "path";
 function getAdminSpaHtml() {
   const possiblePaths = [
-    path.resolve(__dirname, "../public/admin.html"),
-    path.resolve(__dirname, "../../backend/public/admin.html"),
     path.resolve(process.cwd(), "backend/public/admin.html"),
     path.resolve(process.cwd(), "public/admin.html"),
-    path.resolve(__dirname, "../index.html"),
-    path.resolve(process.cwd(), "backend/index.html")
+    path.resolve(process.cwd(), "backend/index.html"),
+    path.resolve(process.cwd(), "public/index.html"),
+    path.resolve(process.cwd(), "index.html")
   ];
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
@@ -77068,7 +77067,7 @@ function getAdminSpaHtml() {
 
 // src/app.ts
 var __filename = fileURLToPath(import.meta.url);
-var __dirname2 = path2.dirname(__filename);
+var __dirname = path2.dirname(__filename);
 function createApp() {
   const app2 = (0, import_express12.default)();
   app2.use((req, res, next) => {
@@ -77128,8 +77127,8 @@ function createApp() {
   app2.get("/api/health", (req, res) => {
     res.json({ status: "ok", name: "Earn Street API", timestamp: /* @__PURE__ */ new Date() });
   });
-  const publicDir = path2.resolve(__dirname2, "../public");
-  const backendAssetsDir = path2.resolve(__dirname2, "../assets");
+  const publicDir = path2.resolve(__dirname, "../public");
+  const backendAssetsDir = path2.resolve(__dirname, "../assets");
   const rootAssetsDir = path2.resolve(process.cwd(), "assets");
   const rootPublicAssetsDir = path2.resolve(process.cwd(), "public/assets");
   app2.use("/assets", import_express12.default.static(path2.join(publicDir, "assets")));

@@ -3,12 +3,11 @@ import path from 'path';
 
 export function getAdminSpaHtml(): string {
   const possiblePaths = [
-    path.resolve(__dirname, '../public/admin.html'),
-    path.resolve(__dirname, '../../backend/public/admin.html'),
     path.resolve(process.cwd(), 'backend/public/admin.html'),
     path.resolve(process.cwd(), 'public/admin.html'),
-    path.resolve(__dirname, '../index.html'),
     path.resolve(process.cwd(), 'backend/index.html'),
+    path.resolve(process.cwd(), 'public/index.html'),
+    path.resolve(process.cwd(), 'index.html'),
   ];
 
   for (const p of possiblePaths) {
