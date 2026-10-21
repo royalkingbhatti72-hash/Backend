@@ -128,7 +128,9 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
         (task.unlockFee && task.unlockFee > 0) ||
         task.taskType?.toLowerCase().includes('prepaid') ||
         task.taskNumber === 5 ||
-        task.taskNumber === 10
+        task.taskNumber === 10 ||
+        task.taskNumber === 15 ||
+        task.taskNumber === 20
       );
       const points = isPrepaid
         ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)

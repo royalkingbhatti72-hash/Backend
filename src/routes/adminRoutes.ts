@@ -974,7 +974,9 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
         (task.unlockFee && task.unlockFee > 0) ||
         task.taskType?.toLowerCase().includes('prepaid') ||
         task.taskNumber === 5 ||
-        task.taskNumber === 10
+        task.taskNumber === 10 ||
+        task.taskNumber === 15 ||
+        task.taskNumber === 20
       );
       const creditPointsToAdd = isPrepaidTask
         ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)
@@ -1078,14 +1080,14 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           },
         });
 
-        // Task 3 and Task 7 Milestone: Trigger a Free Spin entitlement that goes to admin for prize determination
-        if (task.taskNumber === 3 || task.taskNumber === 7) {
-          const milestoneReason = `Level ${task.level.levelNumber} Task ${task.taskNumber} Milestone Free Spin`;
+        // Level Completion Milestone (Final Task of Level): Trigger a Free Spin entitlement that goes to admin for prize determination
+        const isFinalTaskOfLevel = task.taskNumber === (task.level.requiredTaskCount || 10);
+        if (isFinalTaskOfLevel) {
+          const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
           const existingEntitlement = await tx.userSpinEntitlement.findFirst({
             where: {
               userId: user.id,
               levelNumber: task.level.levelNumber,
-              taskNumber: task.taskNumber,
             },
           });
 
@@ -1108,8 +1110,8 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
             await tx.notification.create({
               data: {
                 userId: user.id,
-                title: `Task ${task.taskNumber} Milestone Spin Earned! 🎡`,
-                message: `Congratulations! Completing Task ${task.taskNumber} in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+                title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! 🎡`,
+                message: `Congratulations! Completing all ${task.taskNumber} tasks in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
                 notificationType: 'SPIN_REWARD',
               },
             });

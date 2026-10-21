@@ -218,7 +218,7 @@ export const DATASET_10_LEVELS: LevelDatasetItem[] = [
       { "task_id": 16, "type": "Subscribe", "url": "https://youtu.be/DLGqHOMIE5c?si=f4XCCwwkd0hwxnOL", "commission": 400, "credit_points": 4, "is_prepaid": false },
       { "task_id": 17, "type": "Like and Comment", "url": "https://youtu.be/gjV-K4g3fm4?si=n_5RYC2-NM19_VhH", "commission": 400, "credit_points": 4, "is_prepaid": false },
       { "task_id": 18, "type": "Watch Video (30s)", "url": "https://youtu.be/LhUkk8z5V5E?si=yJjzGjtCLVAhvVem", "commission": 400, "credit_points": 4, "is_prepaid": false },
-      { "task_id": 19, "type": "Watch Video (45s)", "url": "https://youtu.be/Idek3A89slQ?si=onRru3zLmNC-Cvt", "commission": 400, "credit_points": 4, "is_prepaid": false },
+      { "task_id": 19, "type": "Watch Video (45s)", "url": "https://youtu.be/Idek3A89slQ?si=onRru3zLmNC-Cvt_", "commission": 400, "credit_points": 4, "is_prepaid": false },
       { "task_id": 20, "type": "Prepaid Task #4", "url": "https://youtu.be/LK11EmCjJzQ?si=Q3s0EJYu4GKC5XWq", "commission": 800, "credit_points": 9, "is_prepaid": true, "prepaid_value": 1000000 }
     ]
   },

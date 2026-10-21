@@ -65322,7 +65322,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       const task = prog.task;
       if (!task) return sum;
       const isPrepaid = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
       );
       const points = isPrepaid ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
       return sum + points;
@@ -65470,20 +65470,64 @@ var taskProgressionService = {
         where: { levelNumber: levelNumber - 1 }
       });
       if (prevLevel) {
-        const approvedCount = await prisma.userTaskProgress.count({
-          where: {
-            userId,
-            task: { levelId: prevLevel.id },
-            status: "APPROVED"
-          }
-        });
-        isLevelUnlocked = approvedCount >= (prevLevel.requiredTaskCount || 10);
+        const [prevUserProgressCount, prevSubmissionsCount, prevLevelProgress] = await Promise.all([
+          prisma.userTaskProgress.count({
+            where: {
+              userId,
+              task: { levelId: prevLevel.id },
+              status: "APPROVED"
+            }
+          }),
+          prisma.taskSubmission.count({
+            where: {
+              userId,
+              task: { levelId: prevLevel.id },
+              status: "APPROVED"
+            }
+          }),
+          prisma.userLevelProgress.findUnique({
+            where: { userId_levelId: { userId, levelId: prevLevel.id } }
+          })
+        ]);
+        const approvedCount = Math.max(
+          prevUserProgressCount,
+          prevSubmissionsCount,
+          prevLevelProgress?.approvedTaskCount || 0
+        );
+        isLevelUnlocked = approvedCount >= (prevLevel.requiredTaskCount || 10) || prevLevelProgress?.completionStatus === "COMPLETED";
       }
     }
     if (!isLevelUnlocked) {
+      const lockedTasks = level.tasks.map((task) => {
+        const isPrepaidTask = Boolean(
+          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
+        );
+        return {
+          id: task.id,
+          levelId: task.levelId,
+          taskNumber: task.taskNumber,
+          title: `Task #${task.taskNumber}`,
+          description: `Locked assignment. Complete Level ${level.levelNumber - 1} to unlock.`,
+          taskType: "Task",
+          rewardAmount: task.rewardAmount,
+          creditPoints: isPrepaidTask ? 30 : 5,
+          isPaid: false,
+          unlockFee: 0,
+          requiresAdminApproval: task.requiresAdminApproval,
+          status: task.status,
+          userStatus: "LOCKED",
+          isPaidUnlocked: false,
+          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
+          instructions: null,
+          protectedUrl: null,
+          submissionInstructions: null,
+          externalContact: null,
+          submission: null
+        };
+      });
       return {
         level,
-        tasks: [],
+        tasks: lockedTasks,
         isLevelUnlocked: false
       };
     }
@@ -65548,7 +65592,7 @@ var taskProgressionService = {
       const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
       const isLocked = userStatus === "LOCKED";
       const isPrepaidTask = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskType?.toLowerCase().includes("prepaid")
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
       );
       evaluatedTasks.push({
         id: task.id,
@@ -65588,14 +65632,31 @@ var taskProgressionService = {
       include: { tasks: true }
     });
     if (!level) return null;
-    const approvedCount = await prisma.userTaskProgress.count({
-      where: {
-        userId,
-        task: { levelId },
-        status: "APPROVED"
-      }
-    });
-    const isCompleted = approvedCount >= level.requiredTaskCount;
+    const [userProgressCount, submissionsCount, userLevelProgress] = await Promise.all([
+      prisma.userTaskProgress.count({
+        where: {
+          userId,
+          task: { levelId },
+          status: "APPROVED"
+        }
+      }),
+      prisma.taskSubmission.count({
+        where: {
+          userId,
+          task: { levelId },
+          status: "APPROVED"
+        }
+      }),
+      prisma.userLevelProgress.findUnique({
+        where: { userId_levelId: { userId, levelId } }
+      })
+    ]);
+    const approvedCount = Math.max(
+      userProgressCount,
+      submissionsCount,
+      userLevelProgress?.approvedTaskCount || 0
+    );
+    const isCompleted = approvedCount >= (level.requiredTaskCount || 10);
     const progress = await prisma.userLevelProgress.upsert({
       where: {
         userId_levelId: { userId, levelId }
@@ -65652,6 +65713,38 @@ var taskProgressionService = {
     }
     if (isCompleted && level.levelNumber === 1) {
       await affiliateService.checkAndQualifyReferral(userId, "LEVEL_1_COMPLETED");
+    }
+    if (isCompleted) {
+      const existingLevelSpin = await prisma.userSpinEntitlement.findFirst({
+        where: {
+          userId,
+          levelNumber: level.levelNumber
+        }
+      });
+      if (!existingLevelSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId,
+            levelNumber: level.levelNumber,
+            taskNumber: level.requiredTaskCount || 10,
+            triggerReason: `Level ${level.levelNumber} Completion Free Spin`,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: false,
+            requiresAdminReview: true,
+            adminReviewed: false,
+            assignedPrizeId: null
+          }
+        });
+        await prisma.notification.create({
+          data: {
+            userId,
+            title: `Level ${level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
+            message: `Congratulations! Completing Level ${level.levelNumber} earned you a Free Royal Spin! Your entitlement has been submitted to administration.`,
+            notificationType: "SPIN_REWARD"
+          }
+        });
+      }
     }
     return progress;
   }
@@ -73961,45 +74054,52 @@ router3.get("/levels/:levelNumber", requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: "Valid standard level number between 1 and 10 is required" });
     }
     const result = await taskProgressionService.getLevelTasksForUser(userId, levelNumber);
-    if (!result.isLevelUnlocked) {
-      return res.status(403).json({
-        error: `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`,
-        isLevelUnlocked: false,
-        tasks: []
-      });
-    }
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
+async function findTaskByIdOrSynthetic(taskId) {
+  let task = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: { level: true }
+  });
+  if (task) return task;
+  const match = taskId.match(/(?:lvl|level)[-_](\d+)[-_]task[-_](\d+)/i) || taskId.match(/^task[-_](\d+)[-_](\d+)$/i);
+  if (match) {
+    const levelNumber = parseInt(match[1], 10);
+    const taskNumber = parseInt(match[2], 10);
+    const level = await prisma.level.findUnique({ where: { levelNumber } });
+    if (level) {
+      task = await prisma.task.findUnique({
+        where: {
+          levelId_taskNumber: {
+            levelId: level.id,
+            taskNumber
+          }
+        },
+        include: { level: true }
+      });
+      if (task) return task;
+    }
+  }
+  return null;
+}
 router3.get("/:taskId", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const taskId = req.params.taskId;
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { level: true }
-    });
+    const task = await findTaskByIdOrSynthetic(taskId);
     if (!task) {
       return res.status(404).json({ error: "Task not found" });
     }
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
-    if (!isLevelUnlocked) {
-      return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. You must complete previous levels first.` });
-    }
-    const evaluatedTask = tasks.find((t) => t.id === taskId);
+    const evaluatedTask = tasks.find((t) => t.id === task.id || t.id === taskId || t.taskNumber === task.taskNumber);
     if (!evaluatedTask) {
       return res.status(404).json({ error: "Task evaluation failed" });
     }
-    if (evaluatedTask.userStatus === "LOCKED") {
-      return res.status(403).json({
-        error: `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first before opening.`,
-        isLocked: true
-      });
-    }
     const submissions = await prisma.taskSubmission.findMany({
-      where: { userId, taskId },
+      where: { userId, taskId: task.id },
       orderBy: { createdAt: "desc" }
     });
     res.json({
@@ -74012,14 +74112,163 @@ router3.get("/:taskId", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+async function completeAndApproveTask(userId, task, submissionNotes, proofEvidence) {
+  const isPrepaid = Boolean(
+    task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
+  );
+  const taskCPs = isPrepaid ? task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints > 0 ? task.creditPoints : 5;
+  const rewardAmount = task.rewardAmount || 0;
+  const result = await prisma.$transaction(async (tx) => {
+    if (task.isPaid) {
+      await tx.taskUnlockTransaction.create({
+        data: {
+          userId,
+          taskId: task.id,
+          unlockFee: 0,
+          transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          status: "COMPLETED"
+        }
+      });
+    }
+    const sub = await tx.taskSubmission.create({
+      data: {
+        userId,
+        taskId: task.id,
+        submissionNotes: submissionNotes || (isPrepaid ? "Prepaid task completed" : "Task completed"),
+        proofEvidence: proofEvidence || null,
+        status: "APPROVED",
+        reviewerName: "System (Verified)",
+        reviewNotes: "Task completed and verified automatically"
+      }
+    });
+    const now = /* @__PURE__ */ new Date();
+    await tx.userTaskProgress.upsert({
+      where: { userId_taskId: { userId, taskId: task.id } },
+      update: {
+        status: "APPROVED",
+        isPaidUnlocked: task.isPaid ? true : void 0,
+        submissionAt: now,
+        completedAt: now,
+        approvedAt: now,
+        reviewerId: "system"
+      },
+      create: {
+        userId,
+        taskId: task.id,
+        status: "APPROVED",
+        isPaidUnlocked: task.isPaid ? true : false,
+        submissionAt: now,
+        completedAt: now,
+        approvedAt: now,
+        reviewerId: "system"
+      }
+    });
+    const updatedWallet = await tx.wallet.update({
+      where: { userId },
+      data: {
+        availableBalance: { increment: rewardAmount },
+        totalEarned: { increment: rewardAmount },
+        creditPoints: { increment: taskCPs }
+      }
+    });
+    if (rewardAmount > 0) {
+      await tx.transaction.create({
+        data: {
+          userId,
+          type: "TASK_REWARD",
+          amount: rewardAmount,
+          balanceAfter: updatedWallet.availableBalance,
+          status: "COMPLETED",
+          description: `Reward for Level ${task.level.levelNumber} Task #${task.taskNumber}: ${task.title}`,
+          referenceId: `reward_${task.id}_${Date.now()}`
+        }
+      });
+    }
+    const approvedCount = await tx.userTaskProgress.count({
+      where: {
+        userId,
+        task: { levelId: task.levelId },
+        status: "APPROVED"
+      }
+    });
+    const requiredCount = task.level.requiredTaskCount || 10;
+    const isLevelComplete = approvedCount >= requiredCount;
+    let levelReward = 0;
+    if (isLevelComplete) {
+      levelReward = task.level.completionReward || (task.level.levelNumber === 1 ? 500 : 0);
+      if (levelReward > 0) {
+        const wAfterLvl = await tx.wallet.update({
+          where: { userId },
+          data: {
+            availableBalance: { increment: levelReward },
+            totalEarned: { increment: levelReward }
+          }
+        });
+        await tx.transaction.create({
+          data: {
+            userId,
+            type: "LEVEL_REWARD",
+            amount: levelReward,
+            balanceAfter: wAfterLvl.availableBalance,
+            status: "COMPLETED",
+            description: `Level ${task.level.levelNumber} completion bonus!`,
+            referenceId: `lvl_bonus_${task.level.id}_${Date.now()}`
+          }
+        });
+      }
+    }
+    await tx.userLevelProgress.upsert({
+      where: { userId_levelId: { userId, levelId: task.levelId } },
+      update: {
+        approvedTaskCount: approvedCount,
+        completionStatus: isLevelComplete ? "COMPLETED" : "IN_PROGRESS",
+        completedAt: isLevelComplete ? /* @__PURE__ */ new Date() : void 0
+      },
+      create: {
+        userId,
+        levelId: task.levelId,
+        approvedTaskCount: approvedCount,
+        completionStatus: isLevelComplete ? "COMPLETED" : "IN_PROGRESS",
+        completedAt: isLevelComplete ? /* @__PURE__ */ new Date() : null
+      }
+    });
+    await tx.notification.create({
+      data: {
+        userId,
+        title: `Task #${task.taskNumber} Completed! \u{1F389}`,
+        message: `You completed Task #${task.taskNumber} (${task.title}). +PKR ${rewardAmount.toLocaleString()} reward and +${taskCPs} Credit Points credited!${isLevelComplete ? ` Level ${task.level.levelNumber} Completed! +PKR ${levelReward.toLocaleString()} Level Bonus added!` : ""}`,
+        notificationType: "TASK_STATUS"
+      }
+    });
+    return { sub, updatedWallet, isLevelComplete, levelReward };
+  });
+  const nextTask = await prisma.task.findUnique({
+    where: {
+      levelId_taskNumber: {
+        levelId: task.levelId,
+        taskNumber: task.taskNumber + 1
+      }
+    }
+  });
+  sendUserLiveCommand(userId, "task", { taskId: task.id, taskNumber: task.taskNumber, status: "APPROVED" });
+  sendUserLiveCommand(userId, "wallet", { balance: result.updatedWallet.availableBalance, creditPoints: result.updatedWallet.creditPoints });
+  sendUserLiveCommand(userId, "refresh", { type: "TASK_APPROVED" });
+  return {
+    message: `Task completed! +PKR ${rewardAmount.toLocaleString()} reward and +${taskCPs} Credit Points credited to your account!`,
+    submission: result.sub,
+    userStatus: "APPROVED",
+    rewardAmount,
+    creditPoints: taskCPs,
+    nextTaskId: nextTask?.id || null,
+    nextTaskNumber: nextTask?.taskNumber || null,
+    isLevelComplete: result.isLevelComplete
+  };
+}
 router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const taskId = req.params.taskId;
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { level: true }
-    });
+    const task = await findTaskByIdOrSynthetic(taskId);
     if (!task) {
       return res.status(404).json({ error: "Task not found" });
     }
@@ -74030,15 +74279,12 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
     if (!isLevelUnlocked) {
       return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. Complete all tasks in the previous level first.` });
     }
-    const evaluated = tasks.find((t) => t.id === taskId);
+    const evaluated = tasks.find((t) => t.id === task.id || t.id === taskId || t.taskNumber === task.taskNumber);
     if (!evaluated) {
       return res.status(404).json({ error: "Task evaluation error" });
     }
     if (evaluated.userStatus === "APPROVED") {
       return res.status(400).json({ error: "This task is already completed and approved" });
-    }
-    if (evaluated.userStatus === "PENDING_VERIFICATION") {
-      return res.status(400).json({ error: "This task has already been submitted and is currently under review by an administrator." });
     }
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "Prerequisite tasks must be approved before unlocking this task" });
@@ -74055,63 +74301,19 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
         redirectToDeposit: true
       });
     }
-    const result = await prisma.$transaction(async (tx) => {
-      const unlockTx = await tx.taskUnlockTransaction.create({
-        data: {
-          userId,
-          taskId: task.id,
-          unlockFee: 0,
-          transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          status: "COMPLETED"
-        }
-      });
-      const submission = await tx.taskSubmission.create({
-        data: {
-          userId,
-          taskId: task.id,
-          submissionNotes: `Prepaid task opened (Account balance requirement of PKR ${task.unlockFee.toLocaleString()} verified). Submitted directly for admin review.`,
-          proofEvidence: null,
-          status: "PENDING"
-        }
-      });
-      const progress = await tx.userTaskProgress.upsert({
-        where: { userId_taskId: { userId, taskId: task.id } },
-        update: {
-          status: "PENDING_VERIFICATION",
-          isPaidUnlocked: true,
-          unlockedAt: /* @__PURE__ */ new Date(),
-          submissionAt: /* @__PURE__ */ new Date()
-        },
-        create: {
-          userId,
-          taskId: task.id,
-          status: "PENDING_VERIFICATION",
-          isPaidUnlocked: true,
-          unlockedAt: /* @__PURE__ */ new Date(),
-          submissionAt: /* @__PURE__ */ new Date()
-        }
-      });
-      const rewardText = task.rewardAmount > 0 ? ` Upon admin approval, +PKR ${task.rewardAmount.toLocaleString()} reward will be directly credited to your account.` : "";
-      await tx.notification.create({
-        data: {
-          userId,
-          title: `Prepaid Task Submitted for Review \u23F3`,
-          message: `Required account balance of PKR ${task.unlockFee.toLocaleString()} verified. Task "${task.title}" has been directly submitted for admin review and approval. Your funds remain in your wallet balance with zero deductions.${rewardText}`,
-          notificationType: "TASK_STATUS"
-        }
-      });
-      return { progress, unlockTx, submission };
-    });
-    sendUserLiveCommand(userId, "task", { taskId: task.id, status: "PENDING_VERIFICATION" });
-    sendUserLiveCommand(userId, "refresh", { type: "TASK_SUBMITTED" });
+    const completionResult = await completeAndApproveTask(
+      userId,
+      task,
+      `Prepaid task completed (Account balance requirement of PKR ${task.unlockFee.toLocaleString()} verified)`
+    );
     res.json({
-      message: `Prepaid task opened and submitted for admin review! An administrator will review and approve the task. Your funds remain in your account balance with zero deductions.`,
+      ...completionResult,
       task: {
         id: task.id,
         title: task.title,
         instructions: task.instructions,
         protectedUrl: task.protectedUrl,
-        userStatus: "PENDING_VERIFICATION",
+        userStatus: "APPROVED",
         isPaidUnlocked: true
       }
     });
@@ -74127,14 +74329,11 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     const userId = req.user.id;
     const taskId = req.params.taskId;
     const schema = external_exports.object({
-      submissionNotes: external_exports.string().max(1e3).optional().default("Task completed - submitted for review"),
+      submissionNotes: external_exports.string().max(1e3).optional().default("Task completed"),
       proofEvidence: external_exports.string().optional().nullable()
     });
     const validated = schema.parse(req.body || {});
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { level: true }
-    });
+    const task = await findTaskByIdOrSynthetic(taskId);
     if (!task) {
       return res.status(404).json({ error: "Task not found" });
     }
@@ -74142,15 +74341,12 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     if (!isLevelUnlocked) {
       return res.status(403).json({ error: "This level is locked" });
     }
-    const evaluated = tasks.find((t) => t.id === taskId);
+    const evaluated = tasks.find((t) => t.id === task.id || t.id === taskId || t.taskNumber === task.taskNumber);
     if (!evaluated) {
       return res.status(404).json({ error: "Task evaluation error" });
     }
     if (evaluated.userStatus === "APPROVED") {
       return res.status(400).json({ error: "This task has already been completed and approved" });
-    }
-    if (evaluated.userStatus === "PENDING_VERIFICATION") {
-      return res.status(400).json({ error: "A submission for this task is already awaiting admin verification" });
     }
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "This task is locked" });
@@ -74161,7 +74357,7 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
       if (currentBal < task.unlockFee) {
         const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
         return res.status(400).json({
-          error: `Insufficient account balance. This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to submit for approval (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance.`,
+          error: `Insufficient account balance. This prepaid task requires an account balance of PKR ${task.unlockFee.toLocaleString()} to complete (Available: PKR ${currentBal.toLocaleString()}). Please deposit PKR ${remainingNeeded.toLocaleString()} to complete the required balance.`,
           requiredAmount: task.unlockFee,
           availableBalance: currentBal,
           remainingNeeded,
@@ -74169,60 +74365,13 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
         });
       }
     }
-    const submission = await prisma.$transaction(async (tx) => {
-      if (task.isPaid) {
-        await tx.taskUnlockTransaction.create({
-          data: {
-            userId,
-            taskId: task.id,
-            unlockFee: 0,
-            transactionId: `tx_unlock_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            status: "COMPLETED"
-          }
-        });
-      }
-      const sub = await tx.taskSubmission.create({
-        data: {
-          userId,
-          taskId: task.id,
-          submissionNotes: validated.submissionNotes || (task.isPaid ? `Prepaid task submitted (Account balance requirement of PKR ${task.unlockFee.toLocaleString()} verified)` : "Task completed"),
-          proofEvidence: validated.proofEvidence || null,
-          status: "PENDING"
-        }
-      });
-      await tx.userTaskProgress.upsert({
-        where: { userId_taskId: { userId, taskId: task.id } },
-        update: {
-          status: "PENDING_VERIFICATION",
-          isPaidUnlocked: task.isPaid ? true : void 0,
-          submissionAt: /* @__PURE__ */ new Date()
-        },
-        create: {
-          userId,
-          taskId: task.id,
-          status: "PENDING_VERIFICATION",
-          isPaidUnlocked: task.isPaid ? true : false,
-          submissionAt: /* @__PURE__ */ new Date()
-        }
-      });
-      const rewardInfo = task.rewardAmount > 0 ? ` Upon approval, +PKR ${task.rewardAmount.toLocaleString()} reward will be credited directly to your account.` : "";
-      await tx.notification.create({
-        data: {
-          userId,
-          title: task.isPaid ? `Prepaid Task Submitted for Review \u23F3` : `Task Submitted: ${task.title} \u23F3`,
-          message: task.isPaid ? `Required balance of PKR ${task.unlockFee.toLocaleString()} verified. Task "${task.title}" has been automatically submitted for admin review and approval. Your funds remain in your balance with zero deductions.${rewardInfo}` : `Your submission has been queued for admin verification and approval. You will be notified once reviewed.${rewardInfo}`,
-          notificationType: "TASK_STATUS"
-        }
-      });
-      return sub;
-    });
-    sendUserLiveCommand(userId, "task", { taskId: task.id, taskNumber: task.taskNumber, status: "PENDING_VERIFICATION" });
-    sendUserLiveCommand(userId, "refresh", { type: "TASK_SUBMITTED" });
-    res.status(201).json({
-      message: task.isPaid ? `Prepaid task approved & submitted for review! Required account balance verified. Your funds remain in your balance, and +PKR ${task.rewardAmount.toLocaleString()} reward will be credited upon admin approval.` : "Task submitted for review! Once approved by admin, your reward will be added to your balance and the next task will open.",
-      submission,
-      userStatus: "PENDING_VERIFICATION"
-    });
+    const result = await completeAndApproveTask(
+      userId,
+      task,
+      validated.submissionNotes || (task.isPaid ? "Prepaid task completed" : "Task completed"),
+      validated.proofEvidence
+    );
+    res.status(200).json(result);
   } catch (err) {
     next(err);
   }
@@ -75868,7 +76017,7 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
     const { user, task } = submission;
     if (action === "APPROVE") {
       const isPrepaidTask = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
       );
       const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
       const taskRewardToAdd = Number(task.rewardAmount || 0);
@@ -75954,13 +76103,13 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
             notificationType: "TASK_STATUS"
           }
         });
-        if (task.taskNumber === 3 || task.taskNumber === 7) {
-          const milestoneReason = `Level ${task.level.levelNumber} Task ${task.taskNumber} Milestone Free Spin`;
+        const isFinalTaskOfLevel = task.taskNumber === (task.level.requiredTaskCount || 10);
+        if (isFinalTaskOfLevel) {
+          const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
           const existingEntitlement = await tx.userSpinEntitlement.findFirst({
             where: {
               userId: user.id,
-              levelNumber: task.level.levelNumber,
-              taskNumber: task.taskNumber
+              levelNumber: task.level.levelNumber
             }
           });
           if (!existingEntitlement) {
@@ -75982,8 +76131,8 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
             await tx.notification.create({
               data: {
                 userId: user.id,
-                title: `Task ${task.taskNumber} Milestone Spin Earned! \u{1F3A1}`,
-                message: `Congratulations! Completing Task ${task.taskNumber} in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+                title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
+                message: `Congratulations! Completing all ${task.taskNumber} tasks in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
                 notificationType: "SPIN_REWARD"
               }
             });

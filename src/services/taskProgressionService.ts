@@ -48,27 +48,82 @@ export const taskProgressionService = {
     if (levelNumber === 1) {
       isLevelUnlocked = true;
     } else {
-      // Previous level must have all tasks approved
+      // Check previous level completion (or if user has any progress in this level)
       const prevLevel = await prisma.level.findUnique({
         where: { levelNumber: levelNumber - 1 },
       });
       if (prevLevel) {
-        const approvedCount = await prisma.userTaskProgress.count({
-          where: {
-            userId,
-            task: { levelId: prevLevel.id },
-            status: 'APPROVED',
-          },
-        });
-        isLevelUnlocked = approvedCount >= (prevLevel.requiredTaskCount || 10);
+        const [prevUserProgressCount, prevSubmissionsCount, prevLevelProgress] = await Promise.all([
+          prisma.userTaskProgress.count({
+            where: {
+              userId,
+              task: { levelId: prevLevel.id },
+              status: 'APPROVED',
+            },
+          }),
+          prisma.taskSubmission.count({
+            where: {
+              userId,
+              task: { levelId: prevLevel.id },
+              status: 'APPROVED',
+            },
+          }),
+          prisma.userLevelProgress.findUnique({
+            where: { userId_levelId: { userId, levelId: prevLevel.id } },
+          }),
+        ]);
+
+        const approvedCount = Math.max(
+          prevUserProgressCount,
+          prevSubmissionsCount,
+          prevLevelProgress?.approvedTaskCount || 0
+        );
+
+        isLevelUnlocked =
+          approvedCount >= (prevLevel.requiredTaskCount || 10) ||
+          prevLevelProgress?.completionStatus === 'COMPLETED';
       }
     }
 
-    // If level is locked, hide all tasks completely
+    // If level is locked, return tasks with locked status and real IDs
     if (!isLevelUnlocked) {
+      const lockedTasks: EvaluatedTask[] = level.tasks.map((task) => {
+        const isPrepaidTask = Boolean(
+          task.isPaid ||
+          (task.unlockFee && task.unlockFee > 0) ||
+          task.taskNumber === 5 ||
+          task.taskNumber === 10 ||
+          task.taskNumber === 15 ||
+          task.taskNumber === 20 ||
+          task.taskType?.toLowerCase().includes('prepaid')
+        );
+        return {
+          id: task.id,
+          levelId: task.levelId,
+          taskNumber: task.taskNumber,
+          title: `Task #${task.taskNumber}`,
+          description: `Locked assignment. Complete Level ${level.levelNumber - 1} to unlock.`,
+          taskType: 'Task',
+          rewardAmount: task.rewardAmount,
+          creditPoints: isPrepaidTask ? 30 : 5,
+          isPaid: false,
+          unlockFee: 0,
+          requiresAdminApproval: task.requiresAdminApproval,
+          status: task.status,
+          userStatus: 'LOCKED',
+          isPaidUnlocked: false,
+          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
+          instructions: null,
+          protectedUrl: null,
+          submissionInstructions: null,
+          externalContact: null,
+          submission: null,
+        };
+      });
+
       return {
         level,
-        tasks: [],
+        tasks: lockedTasks,
         isLevelUnlocked: false,
       };
     }
@@ -158,6 +213,8 @@ export const taskProgressionService = {
         (task.unlockFee && task.unlockFee > 0) ||
         task.taskNumber === 5 ||
         task.taskNumber === 10 ||
+        task.taskNumber === 15 ||
+        task.taskNumber === 20 ||
         task.taskType?.toLowerCase().includes('prepaid')
       );
 
@@ -204,15 +261,33 @@ export const taskProgressionService = {
     });
     if (!level) return null;
 
-    const approvedCount = await prisma.userTaskProgress.count({
-      where: {
-        userId,
-        task: { levelId },
-        status: 'APPROVED',
-      },
-    });
+    const [userProgressCount, submissionsCount, userLevelProgress] = await Promise.all([
+      prisma.userTaskProgress.count({
+        where: {
+          userId,
+          task: { levelId },
+          status: 'APPROVED',
+        },
+      }),
+      prisma.taskSubmission.count({
+        where: {
+          userId,
+          task: { levelId },
+          status: 'APPROVED',
+        },
+      }),
+      prisma.userLevelProgress.findUnique({
+        where: { userId_levelId: { userId, levelId } },
+      }),
+    ]);
 
-    const isCompleted = approvedCount >= level.requiredTaskCount;
+    const approvedCount = Math.max(
+      userProgressCount,
+      submissionsCount,
+      userLevelProgress?.approvedTaskCount || 0
+    );
+
+    const isCompleted = approvedCount >= (level.requiredTaskCount || 10);
 
     const progress = await prisma.userLevelProgress.upsert({
       where: {
@@ -274,6 +349,42 @@ export const taskProgressionService = {
     // If referee completed Level 1, evaluate referral qualification
     if (isCompleted && level.levelNumber === 1) {
       await affiliateService.checkAndQualifyReferral(userId, 'LEVEL_1_COMPLETED');
+    }
+
+    // Award 1 Free Spin entitlement upon completing the 10th task (level completion)
+    if (isCompleted) {
+      const existingLevelSpin = await prisma.userSpinEntitlement.findFirst({
+        where: {
+          userId,
+          levelNumber: level.levelNumber,
+        },
+      });
+
+      if (!existingLevelSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId,
+            levelNumber: level.levelNumber,
+            taskNumber: level.requiredTaskCount || 10,
+            triggerReason: `Level ${level.levelNumber} Completion Free Spin`,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: false,
+            requiresAdminReview: true,
+            adminReviewed: false,
+            assignedPrizeId: null,
+          },
+        });
+
+        await prisma.notification.create({
+          data: {
+            userId,
+            title: `Level ${level.levelNumber} Completed! Free Spin Earned! 🎡`,
+            message: `Congratulations! Completing Level ${level.levelNumber} earned you a Free Royal Spin! Your entitlement has been submitted to administration.`,
+            notificationType: 'SPIN_REWARD',
+          },
+        });
+      }
     }
 
     return progress;
