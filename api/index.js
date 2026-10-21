@@ -75707,7 +75707,7 @@ router11.post("/users/:userId/reset-password", requireAdmin, async (req, res, ne
     const { temporaryPassword, requireChangeOnLogin, reason } = external_exports.object({
       temporaryPassword: external_exports.string().min(6, "Temporary password must be at least 6 characters"),
       requireChangeOnLogin: external_exports.boolean().default(true),
-      reason: external_exports.string().min(2, "Reason for reset is required")
+      reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Password Reset")
     }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -77114,7 +77114,7 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-ofcjXkCW.js"></script>
+    <script type="module" crossorigin src="/assets/main-DA_kjPIz.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/main-9_Boje6F.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
@@ -77197,8 +77197,8 @@ function createApp() {
   app2.use(import_express12.default.static(path2.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-ofcjXkCW.js")) {
-        return res.redirect(302, "/assets/main-ofcjXkCW.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-DA_kjPIz.js")) {
+        return res.redirect(302, "/assets/main-DA_kjPIz.js");
       }
       if (req.path.endsWith(".css") && !req.path.includes("main-9_Boje6F.css")) {
         return res.redirect(302, "/assets/main-9_Boje6F.css");

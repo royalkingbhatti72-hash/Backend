@@ -536,7 +536,10 @@ router.post('/users/:userId/reset-password', requireAdmin, async (req: AdminAuth
     const { temporaryPassword, requireChangeOnLogin, reason } = z.object({
       temporaryPassword: z.string().min(6, 'Temporary password must be at least 6 characters'),
       requireChangeOnLogin: z.boolean().default(true),
-      reason: z.string().min(2, 'Reason for reset is required'),
+      reason: z
+        .string()
+        .optional()
+        .transform((v) => (v && v.trim() ? v.trim() : 'Admin Password Reset')),
     }).parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
