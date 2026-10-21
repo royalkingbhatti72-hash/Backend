@@ -9,6 +9,7 @@ import { logAdminAction } from '../services/auditService';
 import { taskProgressionService } from '../services/taskProgressionService';
 import { affiliateService } from '../services/affiliateService';
 import { sendUserLiveCommand } from '../utils/supabase';
+import { ensureOfficialSpinPrizes } from '../services/spinPrizeService';
 
 const router = Router();
 
@@ -1080,9 +1081,17 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
           },
         });
 
-        // Level Completion Milestone (Final Task of Level): Trigger a Free Spin entitlement that goes to admin for prize determination
-        const isFinalTaskOfLevel = task.taskNumber === (task.level.requiredTaskCount || 10);
-        if (isFinalTaskOfLevel) {
+        // Level Completion Milestone: Trigger a Free Spin entitlement strictly when ALL tasks in the level are approved (Level completed)
+        const requiredCount = task.level.requiredTaskCount || 10;
+        const approvedTasksInLevel = await tx.taskSubmission.count({
+          where: {
+            userId: user.id,
+            task: { levelId: task.levelId },
+            status: 'APPROVED',
+          },
+        });
+        const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
+        if (isLevelFullyCompleted) {
           const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
           const existingEntitlement = await tx.userSpinEntitlement.findFirst({
             where: {
@@ -1096,7 +1105,7 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
               data: {
                 userId: user.id,
                 levelNumber: task.level.levelNumber,
-                taskNumber: task.taskNumber,
+                taskNumber: requiredCount,
                 triggerReason: milestoneReason,
                 totalSpins: 1,
                 remainingSpins: 1,
@@ -1111,7 +1120,7 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
               data: {
                 userId: user.id,
                 title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! 🎡`,
-                message: `Congratulations! Completing all ${task.taskNumber} tasks in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+                message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
                 notificationType: 'SPIN_REWARD',
               },
             });
@@ -1642,7 +1651,7 @@ router.put('/withdrawals/:withdrawalId/payout', requireAdmin, async (req: AdminA
 router.get('/spin', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const [prizes, entitlements, pendingMilestones, history] = await Promise.all([
-      prisma.spinPrize.findMany({ orderBy: { monetaryValue: 'asc' } }),
+      ensureOfficialSpinPrizes(),
       prisma.userSpinEntitlement.findMany({
         include: {
           user: { select: { id: true, name: true, phone: true } },

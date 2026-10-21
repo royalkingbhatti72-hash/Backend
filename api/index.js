@@ -74641,16 +74641,162 @@ var withdrawalRoutes_default = router6;
 
 // src/routes/spinRoutes.ts
 var import_express7 = __toESM(require_express2(), 1);
+
+// src/services/spinPrizeService.ts
+var OFFICIAL_SPIN_PRIZES = [
+  {
+    name: "PKR 50",
+    displayLabel: "PKR 50",
+    prizeType: "CASH",
+    monetaryValue: 50,
+    color: "#1459E8",
+    icon: "Coins",
+    imageUrl: "/images/spin/product-cash-bundle.jpg"
+  },
+  {
+    name: "PKR 100",
+    displayLabel: "PKR 100",
+    prizeType: "CASH",
+    monetaryValue: 100,
+    color: "#792BFF",
+    icon: "Gift",
+    imageUrl: "/images/spin/product-cash-bundle.jpg"
+  },
+  {
+    name: "Suzuki Alto Car",
+    displayLabel: "Alto Car",
+    prizeType: "PHYSICAL",
+    monetaryValue: 25e5,
+    color: "#059669",
+    icon: "Car",
+    imageUrl: "/images/spin/product-car.jpg"
+  },
+  {
+    name: "PKR 500",
+    displayLabel: "PKR 500",
+    prizeType: "CASH",
+    monetaryValue: 500,
+    color: "#DC2626",
+    icon: "Crown",
+    imageUrl: "/images/spin/product-cash-bundle.jpg"
+  },
+  {
+    name: "PKR 1,000",
+    displayLabel: "PKR 1,000",
+    prizeType: "CASH",
+    monetaryValue: 1e3,
+    color: "#0284C7",
+    icon: "Sparkles",
+    imageUrl: "/images/spin/product-cash-bundle.jpg"
+  },
+  {
+    name: "PKR 5,000",
+    displayLabel: "PKR 5,000 Mega",
+    prizeType: "CASH",
+    monetaryValue: 5e3,
+    color: "#D97706",
+    icon: "Trophy",
+    imageUrl: "/images/spin/spin-jackpot-treasure.jpg"
+  },
+  {
+    name: "Expensive Watch",
+    displayLabel: "Expensive Watch",
+    prizeType: "PHYSICAL",
+    monetaryValue: 45e3,
+    color: "#4F46E5",
+    icon: "Watch",
+    imageUrl: "/images/spin/product-watch.jpg"
+  },
+  {
+    name: "iPhone 15 Pro",
+    displayLabel: "iPhone 15 Pro",
+    prizeType: "PHYSICAL",
+    monetaryValue: 35e4,
+    color: "#EAB308",
+    icon: "Smartphone",
+    imageUrl: "/images/spin/product-smartphone.jpg"
+  }
+];
+async function ensureOfficialSpinPrizes() {
+  const existing = await prisma.spinPrize.findMany();
+  if (existing.length === 0) {
+    for (const p of OFFICIAL_SPIN_PRIZES) {
+      await prisma.spinPrize.create({
+        data: {
+          ...p,
+          status: "ACTIVE"
+        }
+      });
+    }
+  } else {
+    for (const official of OFFICIAL_SPIN_PRIZES) {
+      const match = existing.find((e) => {
+        if (e.name === official.name || e.displayLabel === official.displayLabel) return true;
+        if (official.name === "Suzuki Alto Car" && (e.name.includes("250") || e.displayLabel.includes("250") || e.name.toLowerCase().includes("alto") || e.name.toLowerCase().includes("car"))) {
+          return true;
+        }
+        if (official.name === "Expensive Watch" && (e.name.toLowerCase().includes("watch") || e.displayLabel.toLowerCase().includes("watch"))) {
+          return true;
+        }
+        if (official.name === "iPhone 15 Pro" && (e.name.toLowerCase().includes("smartphone") || e.name.toLowerCase().includes("phone") || e.displayLabel.toLowerCase().includes("smartphone") || e.displayLabel.toLowerCase().includes("iphone"))) {
+          return true;
+        }
+        if (official.prizeType === "CASH" && e.monetaryValue === official.monetaryValue) {
+          return true;
+        }
+        return false;
+      });
+      if (match) {
+        await prisma.spinPrize.update({
+          where: { id: match.id },
+          data: {
+            name: official.name,
+            displayLabel: official.displayLabel,
+            prizeType: official.prizeType,
+            monetaryValue: official.monetaryValue,
+            color: official.color,
+            icon: official.icon,
+            status: "ACTIVE"
+          }
+        });
+      } else {
+        await prisma.spinPrize.create({
+          data: {
+            ...official,
+            status: "ACTIVE"
+          }
+        });
+      }
+    }
+  }
+  const allActive = await prisma.spinPrize.findMany({
+    where: { status: "ACTIVE" }
+  });
+  const orderedPrizes = OFFICIAL_SPIN_PRIZES.map((off) => {
+    const found = allActive.find(
+      (a) => a.name === off.name || a.displayLabel === off.displayLabel
+    );
+    if (found) return found;
+    return {
+      id: `p-${off.name.replace(/\s+/g, "-").toLowerCase()}`,
+      ...off,
+      inventory: 999999,
+      status: "ACTIVE",
+      createdAt: /* @__PURE__ */ new Date(),
+      updatedAt: /* @__PURE__ */ new Date()
+    };
+  });
+  return orderedPrizes;
+}
+
+// src/routes/spinRoutes.ts
 var router7 = (0, import_express7.Router)();
 router7.get("/status", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const globalSpinSetting = await prisma.siteSetting.findUnique({ where: { key: "spin_enabled" } });
     const isGlobalSpinEnabled = globalSpinSetting ? globalSpinSetting.value === "true" : true;
-    const prizes = await prisma.spinPrize.findMany({
-      where: { status: "ACTIVE" },
-      orderBy: { monetaryValue: "asc" }
-    });
+    const prizes = await ensureOfficialSpinPrizes();
     const entitlement = await prisma.userSpinEntitlement.findFirst({
       where: {
         userId,
@@ -74700,45 +74846,15 @@ router7.get("/status", requireAuth, async (req, res, next) => {
       pendingMilestone,
       wonProducts,
       isLevel10Completed: !!level10Progress,
-      prizes: prizes.map((p) => {
-        let name = p.name;
-        let displayLabel = p.displayLabel;
-        let prizeType = p.prizeType;
-        let monetaryValue = p.monetaryValue;
-        let color = p.color;
-        let icon = p.icon;
-        if (name.includes("250") || displayLabel.includes("250") || name.toLowerCase().includes("alto")) {
-          name = "Suzuki Alto Car";
-          displayLabel = "Alto Car";
-          prizeType = "PHYSICAL";
-          monetaryValue = 25e5;
-          color = "#059669";
-          icon = "Car";
-        } else if (name.toLowerCase().includes("watch") || displayLabel.toLowerCase().includes("watch")) {
-          name = "Expensive Watch";
-          displayLabel = "Expensive Watch";
-          prizeType = "PHYSICAL";
-          monetaryValue = 45e3;
-          color = "#4F46E5";
-          icon = "Watch";
-        } else if (name.toLowerCase().includes("phone") || displayLabel.toLowerCase().includes("phone") || name.toLowerCase().includes("iphone")) {
-          name = "iPhone 15 Pro";
-          displayLabel = "iPhone 15 Pro";
-          prizeType = "PHYSICAL";
-          monetaryValue = 35e4;
-          color = "#EAB308";
-          icon = "Smartphone";
-        }
-        return {
-          id: p.id,
-          name,
-          displayLabel,
-          color,
-          icon,
-          prizeType,
-          monetaryValue
-        };
-      }),
+      prizes: prizes.map((p) => ({
+        id: p.id,
+        name: p.name,
+        displayLabel: p.displayLabel,
+        color: p.color,
+        icon: p.icon,
+        prizeType: p.prizeType,
+        monetaryValue: p.monetaryValue
+      })),
       history
     });
   } catch (err) {
@@ -74779,10 +74895,7 @@ router7.post("/play", requireAuth, async (req, res, next) => {
         error: "You do not have any available spins. Complete levels or invite 3 friends in 24 hours to earn free spins!"
       });
     }
-    const allActivePrizes = await prisma.spinPrize.findMany({
-      where: { status: "ACTIVE" },
-      orderBy: { monetaryValue: "asc" }
-    });
+    const allActivePrizes = await ensureOfficialSpinPrizes();
     if (allActivePrizes.length === 0) {
       return res.status(500).json({ error: "No active prizes configured in the wheel." });
     }
@@ -76038,8 +76151,16 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
             notificationType: "TASK_STATUS"
           }
         });
-        const isFinalTaskOfLevel = task.taskNumber === (task.level.requiredTaskCount || 10);
-        if (isFinalTaskOfLevel) {
+        const requiredCount = task.level.requiredTaskCount || 10;
+        const approvedTasksInLevel = await tx.taskSubmission.count({
+          where: {
+            userId: user.id,
+            task: { levelId: task.levelId },
+            status: "APPROVED"
+          }
+        });
+        const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
+        if (isLevelFullyCompleted) {
           const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
           const existingEntitlement = await tx.userSpinEntitlement.findFirst({
             where: {
@@ -76052,7 +76173,7 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
               data: {
                 userId: user.id,
                 levelNumber: task.level.levelNumber,
-                taskNumber: task.taskNumber,
+                taskNumber: requiredCount,
                 triggerReason: milestoneReason,
                 totalSpins: 1,
                 remainingSpins: 1,
@@ -76067,7 +76188,7 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
               data: {
                 userId: user.id,
                 title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
-                message: `Congratulations! Completing all ${task.taskNumber} tasks in Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+                message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
                 notificationType: "SPIN_REWARD"
               }
             });
@@ -76511,7 +76632,7 @@ router11.put("/withdrawals/:withdrawalId/payout", requireAdmin, async (req, res,
 router11.get("/spin", requireAdmin, async (req, res, next) => {
   try {
     const [prizes, entitlements, pendingMilestones, history] = await Promise.all([
-      prisma.spinPrize.findMany({ orderBy: { monetaryValue: "asc" } }),
+      ensureOfficialSpinPrizes(),
       prisma.userSpinEntitlement.findMany({
         include: {
           user: { select: { id: true, name: true, phone: true } },
@@ -76929,14 +77050,34 @@ var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 function createApp() {
   const app2 = (0, import_express12.default)();
+  app2.use((req, res, next) => {
+    const origin = req.headers.origin || "*";
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Api-Key");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+    next();
+  });
   app2.use((0, import_cors.default)({
     origin: (origin, callback) => {
       callback(null, true);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "X-Api-Key"]
   }));
+  app2.options("*", (req, res) => {
+    const origin = req.headers.origin || "*";
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Api-Key");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.status(204).end();
+  });
   app2.use(import_express12.default.json());
   app2.use(import_express12.default.urlencoded({ extended: true }));
   if (process.env.NODE_ENV !== "test") {

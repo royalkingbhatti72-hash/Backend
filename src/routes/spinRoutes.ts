@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { ensureOfficialSpinPrizes } from '../services/spinPrizeService';
 
 const router = Router();
 
@@ -16,11 +17,8 @@ router.get('/status', requireAuth, async (req: AuthRequest, res: Response, next)
     const globalSpinSetting = await prisma.siteSetting.findUnique({ where: { key: 'spin_enabled' } });
     const isGlobalSpinEnabled = globalSpinSetting ? globalSpinSetting.value === 'true' : true;
 
-    // Fetch active prizes for wheel rendering
-    const prizes = await prisma.spinPrize.findMany({
-      where: { status: 'ACTIVE' },
-      orderBy: { monetaryValue: 'asc' },
-    });
+    // Ensure active prizes match official canonical list
+    const prizes = await ensureOfficialSpinPrizes();
 
     // Check user entitlement
     const entitlement = await prisma.userSpinEntitlement.findFirst({
@@ -81,47 +79,15 @@ router.get('/status', requireAuth, async (req: AuthRequest, res: Response, next)
       pendingMilestone,
       wonProducts,
       isLevel10Completed: !!level10Progress,
-      prizes: prizes.map((p) => {
-        let name = p.name;
-        let displayLabel = p.displayLabel;
-        let prizeType = p.prizeType;
-        let monetaryValue = p.monetaryValue;
-        let color = p.color;
-        let icon = p.icon;
-
-        if (name.includes('250') || displayLabel.includes('250') || name.toLowerCase().includes('alto')) {
-          name = 'Suzuki Alto Car';
-          displayLabel = 'Alto Car';
-          prizeType = 'PHYSICAL';
-          monetaryValue = 2500000;
-          color = '#059669';
-          icon = 'Car';
-        } else if (name.toLowerCase().includes('watch') || displayLabel.toLowerCase().includes('watch')) {
-          name = 'Expensive Watch';
-          displayLabel = 'Expensive Watch';
-          prizeType = 'PHYSICAL';
-          monetaryValue = 45000;
-          color = '#4F46E5';
-          icon = 'Watch';
-        } else if (name.toLowerCase().includes('phone') || displayLabel.toLowerCase().includes('phone') || name.toLowerCase().includes('iphone')) {
-          name = 'iPhone 15 Pro';
-          displayLabel = 'iPhone 15 Pro';
-          prizeType = 'PHYSICAL';
-          monetaryValue = 350000;
-          color = '#EAB308';
-          icon = 'Smartphone';
-        }
-
-        return {
-          id: p.id,
-          name,
-          displayLabel,
-          color,
-          icon,
-          prizeType,
-          monetaryValue,
-        };
-      }),
+      prizes: prizes.map((p) => ({
+        id: p.id,
+        name: p.name,
+        displayLabel: p.displayLabel,
+        color: p.color,
+        icon: p.icon,
+        prizeType: p.prizeType,
+        monetaryValue: p.monetaryValue,
+      })),
       history,
     });
   } catch (err) {
@@ -175,11 +141,8 @@ router.post('/play', requireAuth, async (req: AuthRequest, res: Response, next) 
       });
     }
 
-    // All active prizes
-    const allActivePrizes = await prisma.spinPrize.findMany({
-      where: { status: 'ACTIVE' },
-      orderBy: { monetaryValue: 'asc' },
-    });
+    // All active prizes synchronized with canonical wheel
+    const allActivePrizes = await ensureOfficialSpinPrizes();
 
     if (allActivePrizes.length === 0) {
       return res.status(500).json({ error: 'No active prizes configured in the wheel.' });
