@@ -940,6 +940,284 @@ router.get('/submissions', requireAdmin, async (req: AdminAuthRequest, res: Resp
   }
 });
 
+async function executeReviewSubmissionCore(params: {
+  submissionId: string;
+  action: 'APPROVE' | 'REJECT';
+  admin: { id: string; username: string };
+  reviewNotes?: string;
+  rejectionReason?: string;
+  ipAddress?: string;
+}) {
+  const { submissionId, action, admin, reviewNotes, rejectionReason, ipAddress } = params;
+
+  const submission: any = await prisma.taskSubmission.findUnique({
+    where: { id: submissionId },
+    include: {
+      task: { include: { level: true } },
+      user: true,
+    },
+  });
+
+  if (!submission) throw new Error('Submission not found');
+  if (submission.status !== 'PENDING') {
+    throw new Error(`This submission has already been reviewed (Status: ${submission.status})`);
+  }
+
+  const { user, task } = submission;
+
+  if (action === 'APPROVE') {
+    const isPrepaidTask = Boolean(
+      task.isPaid ||
+      (task.unlockFee && task.unlockFee > 0) ||
+      task.taskType?.toLowerCase().includes('prepaid') ||
+      task.taskNumber === 5 ||
+      task.taskNumber === 10 ||
+      task.taskNumber === 15 ||
+      task.taskNumber === 20
+    );
+    const creditPointsToAdd = isPrepaidTask
+      ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)
+      : (task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5);
+    const taskRewardToAdd = Number(task.rewardAmount || 0);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Update submission
+      const updatedSub = await tx.taskSubmission.update({
+        where: { id: submissionId },
+        data: {
+          status: 'APPROVED',
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: reviewNotes || null,
+        },
+      });
+
+      // Check if task was ALREADY approved for this user before incrementing
+      const existingProgress = await tx.userTaskProgress.findUnique({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } },
+      });
+      const wasAlreadyApproved = existingProgress?.status === 'APPROVED';
+
+      // Update UserTaskProgress
+      await tx.userTaskProgress.upsert({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } },
+        update: {
+          status: 'APPROVED',
+          approvedAt: new Date(),
+          reviewerId: admin.id,
+        },
+        create: {
+          userId: user.id,
+          taskId: task.id,
+          status: 'APPROVED',
+          approvedAt: new Date(),
+          reviewerId: admin.id,
+        },
+      });
+
+      // Resolve any other pending submissions for this task
+      await tx.taskSubmission.updateMany({
+        where: {
+          userId: user.id,
+          taskId: task.id,
+          status: 'PENDING',
+          id: { not: submissionId },
+        },
+        data: {
+          status: 'APPROVED',
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: 'Auto-resolved with task approval',
+        },
+      });
+
+      // Credit wallet
+      let updatedWallet: any = await tx.wallet.findUnique({ where: { userId: user.id } });
+
+      if (!wasAlreadyApproved) {
+        const walletUpdateData: any = {
+          creditPoints: { increment: creditPointsToAdd },
+        };
+        if (taskRewardToAdd > 0) {
+          walletUpdateData.availableBalance = { increment: taskRewardToAdd };
+          walletUpdateData.totalEarned = { increment: taskRewardToAdd };
+        }
+
+        updatedWallet = await tx.wallet.update({
+          where: { userId: user.id },
+          data: walletUpdateData,
+        });
+
+        if (taskRewardToAdd > 0) {
+          await tx.walletTransaction.create({
+            data: {
+              userId: user.id,
+              transactionType: 'TASK_REWARD',
+              amount: taskRewardToAdd,
+              currency: 'PKR',
+              status: 'COMPLETED',
+              relatedEntityId: task.id,
+              actorId: admin.id,
+              actorName: admin.username,
+              reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
+              notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet.availableBalance.toLocaleString()}`,
+            },
+          });
+        }
+      }
+
+      // Notification
+      const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : '';
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points 🎉`,
+          message: `Your task "${task.title}" was approved by administrator ${admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ''} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
+          notificationType: 'TASK_STATUS',
+        },
+      });
+
+      // Level Completion Milestone: Trigger a Free Spin entitlement strictly when ALL tasks in the level are approved
+      const requiredCount = task.level.requiredTaskCount || 10;
+      const approvedTasksInLevel = await tx.taskSubmission.count({
+        where: {
+          userId: user.id,
+          task: { levelId: task.levelId },
+          status: 'APPROVED',
+        },
+      });
+      const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
+      if (isLevelFullyCompleted) {
+        const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
+        const existingEntitlement = await tx.userSpinEntitlement.findFirst({
+          where: {
+            userId: user.id,
+            levelNumber: task.level.levelNumber,
+          },
+        });
+
+        if (!existingEntitlement) {
+          await tx.userSpinEntitlement.create({
+            data: {
+              userId: user.id,
+              levelNumber: task.level.levelNumber,
+              taskNumber: requiredCount,
+              triggerReason: milestoneReason,
+              totalSpins: 1,
+              remainingSpins: 1,
+              isEligible: false,
+              requiresAdminReview: true,
+              adminReviewed: false,
+              assignedPrizeId: null,
+            },
+          });
+
+          await tx.notification.create({
+            data: {
+              userId: user.id,
+              title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! 🎡`,
+              message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+              notificationType: 'SPIN_REWARD',
+            },
+          });
+        }
+      }
+
+      return { updatedSub, updatedWallet };
+    });
+
+    const { updatedSub, updatedWallet } = result;
+
+    // Parallelize level progression & referral qualification queries
+    await Promise.all([
+      taskProgressionService.updateLevelProgress(user.id, task.levelId),
+      affiliateService.checkAndQualifyReferral(user.id, 'TASK_APPROVED'),
+    ]);
+
+    // Dispatch non-blocking audit logging & live WebSocket events asynchronously
+    logAdminAction({
+      adminId: admin.id,
+      adminUsername: admin.username,
+      action: 'TASK_SUBMISSION_APPROVED',
+      entityType: 'TaskSubmission',
+      entityId: submissionId,
+      newState: {
+        status: 'APPROVED',
+        rewardAmount: task.rewardAmount,
+        creditPoints: creditPointsToAdd,
+        newBalance: updatedWallet.availableBalance,
+      },
+      reason: reviewNotes,
+      ipAddress,
+    }).catch((e) => console.error('Admin audit log error:', e));
+
+    sendUserLiveCommand(user.id, 'wallet', {
+      availableBalance: updatedWallet.availableBalance,
+      totalEarned: updatedWallet.totalEarned,
+      creditPoints: updatedWallet.creditPoints,
+    });
+    sendUserLiveCommand(user.id, 'task', { submissionId, taskId: task.id, status: 'APPROVED' });
+    sendUserLiveCommand(user.id, 'refresh', { type: 'TASK_APPROVED' });
+
+    return { updatedSub, updatedWallet };
+  } else {
+    // REJECT
+    const updatedSub = await prisma.$transaction(async (tx) => {
+      const sub = await tx.taskSubmission.update({
+        where: { id: submissionId },
+        data: {
+          status: 'REJECTED',
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: reviewNotes || null,
+          rejectionReason: rejectionReason || 'Verification requirements not satisfied',
+        },
+      });
+
+      await tx.userTaskProgress.upsert({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } },
+        update: {
+          status: 'REJECTED',
+          rejectionReason: rejectionReason || 'Verification requirements not satisfied',
+        },
+        create: {
+          userId: user.id,
+          taskId: task.id,
+          status: 'REJECTED',
+          rejectionReason: rejectionReason || 'Verification requirements not satisfied',
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          title: `Task Submission Rejected ❌`,
+          message: `Your submission for "${task.title}" was rejected. Reason: ${rejectionReason || 'Please resubmit with clear proof.'}`,
+          notificationType: 'TASK_STATUS',
+        },
+      });
+
+      return sub;
+    });
+
+    logAdminAction({
+      adminId: admin.id,
+      adminUsername: admin.username,
+      action: 'TASK_SUBMISSION_REJECTED',
+      entityType: 'TaskSubmission',
+      entityId: submissionId,
+      newState: { status: 'REJECTED', rejectionReason },
+      reason: reviewNotes,
+      ipAddress,
+    }).catch((e) => console.error('Admin audit log error:', e));
+
+    sendUserLiveCommand(user.id, 'task', { submissionId, taskId: task.id, status: 'REJECTED' });
+    sendUserLiveCommand(user.id, 'refresh', { type: 'TASK_REJECTED' });
+
+    return { updatedSub };
+  }
+}
+
 router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const submissionId = req.params.submissionId as string;
@@ -949,273 +1227,64 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
       rejectionReason: z.string().optional(),
     }).parse(req.body);
 
-    const submission: any = await prisma.taskSubmission.findUnique({
-      where: { id: submissionId },
-      include: {
-        task: { include: { level: true } },
-        user: true,
-      },
+    const result = await executeReviewSubmissionCore({
+      submissionId,
+      action,
+      admin: { id: req.admin!.id, username: req.admin!.username },
+      reviewNotes,
+      rejectionReason,
+      ipAddress: req.ip,
     });
 
-    if (!submission) return res.status(404).json({ error: 'Submission not found' });
-    if (submission.status !== 'PENDING') {
-      return res.status(400).json({ error: `This submission has already been reviewed (Status: ${submission.status})` });
-    }
-
-    const { user, task } = submission;
-
     if (action === 'APPROVE') {
-      // 1. Credit reward to wallet exactly once
-      // 2. Mark submission APPROVED
-      // 3. Mark UserTaskProgress APPROVED
-      // 4. Update Level Progress
-      // 5. Notify user
-      const isPrepaidTask = Boolean(
-        task.isPaid ||
-        (task.unlockFee && task.unlockFee > 0) ||
-        task.taskType?.toLowerCase().includes('prepaid') ||
-        task.taskNumber === 5 ||
-        task.taskNumber === 10 ||
-        task.taskNumber === 15 ||
-        task.taskNumber === 20
-      );
-      const creditPointsToAdd = isPrepaidTask
-        ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)
-        : (task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5);
-      const taskRewardToAdd = Number(task.rewardAmount || 0);
-
-      const result = await prisma.$transaction(async (tx) => {
-        // Update submission
-        const updatedSub = await tx.taskSubmission.update({
-          where: { id: submissionId },
-          data: {
-            status: 'APPROVED',
-            reviewerId: req.admin!.id,
-            reviewerName: req.admin!.username,
-            reviewNotes: reviewNotes || null,
-          },
-        });
-
-        // Check if task was ALREADY approved for this user before incrementing
-        const existingProgress = await tx.userTaskProgress.findUnique({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-        });
-        const wasAlreadyApproved = existingProgress?.status === 'APPROVED';
-
-        // Update UserTaskProgress
-        await tx.userTaskProgress.upsert({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-          update: {
-            status: 'APPROVED',
-            approvedAt: new Date(),
-            reviewerId: req.admin!.id,
-          },
-          create: {
-            userId: user.id,
-            taskId: task.id,
-            status: 'APPROVED',
-            approvedAt: new Date(),
-            reviewerId: req.admin!.id,
-          },
-        });
-
-        // Resolve any other pending submissions for this task
-        await tx.taskSubmission.updateMany({
-          where: {
-            userId: user.id,
-            taskId: task.id,
-            status: 'PENDING',
-            id: { not: submissionId },
-          },
-          data: {
-            status: 'APPROVED',
-            reviewerId: req.admin!.id,
-            reviewerName: req.admin!.username,
-            reviewNotes: 'Auto-resolved with task approval',
-          },
-        });
-
-        // Credit credit points and PKR task reward directly to wallet ONLY if not already approved
-        let updatedWallet: any = await tx.wallet.findUnique({ where: { userId: user.id } });
-
-        if (!wasAlreadyApproved) {
-          const walletUpdateData: any = {
-            creditPoints: { increment: creditPointsToAdd },
-          };
-          if (taskRewardToAdd > 0) {
-            walletUpdateData.availableBalance = { increment: taskRewardToAdd };
-            walletUpdateData.totalEarned = { increment: taskRewardToAdd };
-          }
-
-          updatedWallet = await tx.wallet.update({
-            where: { userId: user.id },
-            data: walletUpdateData,
-          });
-
-          if (taskRewardToAdd > 0) {
-            await tx.walletTransaction.create({
-              data: {
-                userId: user.id,
-                transactionType: 'TASK_REWARD',
-                amount: taskRewardToAdd,
-                currency: 'PKR',
-                status: 'COMPLETED',
-                relatedEntityId: task.id,
-                actorId: req.admin!.id,
-                actorName: req.admin!.username,
-                reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
-                notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet.availableBalance.toLocaleString()}`,
-              },
-            });
-          }
-        }
-
-        // Notification
-        const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : '';
-        await tx.notification.create({
-          data: {
-            userId: user.id,
-            title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points 🎉`,
-            message: `Your task "${task.title}" was approved by administrator ${req.admin!.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ''} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
-            notificationType: 'TASK_STATUS',
-          },
-        });
-
-        // Level Completion Milestone: Trigger a Free Spin entitlement strictly when ALL tasks in the level are approved (Level completed)
-        const requiredCount = task.level.requiredTaskCount || 10;
-        const approvedTasksInLevel = await tx.taskSubmission.count({
-          where: {
-            userId: user.id,
-            task: { levelId: task.levelId },
-            status: 'APPROVED',
-          },
-        });
-        const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
-        if (isLevelFullyCompleted) {
-          const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
-          const existingEntitlement = await tx.userSpinEntitlement.findFirst({
-            where: {
-              userId: user.id,
-              levelNumber: task.level.levelNumber,
-            },
-          });
-
-          if (!existingEntitlement) {
-            await tx.userSpinEntitlement.create({
-              data: {
-                userId: user.id,
-                levelNumber: task.level.levelNumber,
-                taskNumber: requiredCount,
-                triggerReason: milestoneReason,
-                totalSpins: 1,
-                remainingSpins: 1,
-                isEligible: false, // Goes to admin first to assign the prize outcome
-                requiresAdminReview: true,
-                adminReviewed: false,
-                assignedPrizeId: null,
-              },
-            });
-
-            await tx.notification.create({
-              data: {
-                userId: user.id,
-                title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! 🎡`,
-                message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
-                notificationType: 'SPIN_REWARD',
-              },
-            });
-          }
-        }
-
-        return { updatedSub, updatedWallet };
-      });
-
-      const { updatedSub, updatedWallet } = result;
-
-      // Update level progression and check for level completion
-      await taskProgressionService.updateLevelProgress(user.id, task.levelId);
-
-      // Check and qualify referral if applicable
-      await affiliateService.checkAndQualifyReferral(user.id, 'TASK_APPROVED');
-
-      await logAdminAction({
-        adminId: req.admin!.id,
-        adminUsername: req.admin!.username,
-        action: 'TASK_SUBMISSION_APPROVED',
-        entityType: 'TaskSubmission',
-        entityId: submissionId,
-        newState: {
-          status: 'APPROVED',
-          rewardAmount: task.rewardAmount,
-          creditPoints: creditPointsToAdd,
-          newBalance: updatedWallet.availableBalance,
-        },
-        reason: reviewNotes,
-        ipAddress: req.ip,
-      });
-
-      sendUserLiveCommand(user.id, 'wallet', {
-        availableBalance: updatedWallet.availableBalance,
-        totalEarned: updatedWallet.totalEarned,
-        creditPoints: updatedWallet.creditPoints,
-      });
-      sendUserLiveCommand(user.id, 'task', { submissionId, taskId: task.id, status: 'APPROVED' });
-      sendUserLiveCommand(user.id, 'refresh', { type: 'TASK_APPROVED' });
-
-      res.json({ message: 'Task approved and reward credited successfully!', submission: updatedSub, wallet: updatedWallet });
+      res.json({ message: 'Task approved and reward credited successfully!', submission: result.updatedSub, wallet: result.updatedWallet });
     } else {
-      // REJECT
-      const updatedSub = await prisma.$transaction(async (tx) => {
-        const sub = await tx.taskSubmission.update({
-          where: { id: submissionId },
-          data: {
-            status: 'REJECTED',
-            reviewerId: req.admin!.id,
-            reviewerName: req.admin!.username,
-            reviewNotes: reviewNotes || null,
-            rejectionReason: rejectionReason || 'Verification requirements not satisfied',
-          },
-        });
-
-        await tx.userTaskProgress.upsert({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-          update: {
-            status: 'REJECTED',
-            rejectionReason: rejectionReason || 'Verification requirements not satisfied',
-          },
-          create: {
-            userId: user.id,
-            taskId: task.id,
-            status: 'REJECTED',
-            rejectionReason: rejectionReason || 'Verification requirements not satisfied',
-          },
-        });
-
-        await tx.notification.create({
-          data: {
-            userId: user.id,
-            title: `Task Submission Rejected ❌`,
-            message: `Your submission for "${task.title}" was rejected. Reason: ${rejectionReason || 'Please resubmit with clear proof.'}`,
-            notificationType: 'TASK_STATUS',
-          },
-        });
-
-        return sub;
-      });
-
-      await logAdminAction({
-        adminId: req.admin!.id,
-        adminUsername: req.admin!.username,
-        action: 'TASK_SUBMISSION_REJECTED',
-        entityType: 'TaskSubmission',
-        entityId: submissionId,
-        newState: { status: 'REJECTED', rejectionReason },
-        reason: reviewNotes,
-        ipAddress: req.ip,
-      });
-
-      res.json({ message: 'Task submission rejected.', submission: updatedSub });
+      res.json({ message: 'Task submission rejected.', submission: result.updatedSub });
     }
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/submissions/batch-review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { submissionIds, action, reviewNotes, rejectionReason } = z.object({
+      submissionIds: z.array(z.string()).min(1, 'Select at least one submission'),
+      action: z.enum(['APPROVE', 'REJECT']),
+      reviewNotes: z.string().optional(),
+      rejectionReason: z.string().optional(),
+    }).parse(req.body);
+
+    const results: { id: string; success: boolean; error?: string }[] = [];
+
+    // Process concurrent batches of up to 10
+    const chunkSize = 10;
+    for (let i = 0; i < submissionIds.length; i += chunkSize) {
+      const chunk = submissionIds.slice(i, i + chunkSize);
+      await Promise.all(
+        chunk.map(async (id) => {
+          try {
+            await executeReviewSubmissionCore({
+              submissionId: id,
+              action,
+              admin: { id: req.admin!.id, username: req.admin!.username },
+              reviewNotes,
+              rejectionReason,
+              ipAddress: req.ip,
+            });
+            results.push({ id, success: true });
+          } catch (err: any) {
+            results.push({ id, success: false, error: err.message });
+          }
+        })
+      );
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    res.json({
+      message: `Batch complete: ${successCount} of ${submissionIds.length} submissions ${action.toLowerCase()}d successfully.`,
+      results,
+    });
   } catch (err) {
     next(err);
   }

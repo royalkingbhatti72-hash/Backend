@@ -36,6 +36,9 @@ model User {
   notifications       Notification[]
   transactions        WalletTransaction[]
   sessions            Session[]
+
+  @@index([accountStatus])
+  @@index([createdAt(sort: Desc)])
 }
 
 model Session {
@@ -140,6 +143,7 @@ model UserTaskProgress {
   task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@unique([userId, taskId])
+  @@index([userId, status])
 }
 
 model TaskSubmission {
@@ -158,6 +162,10 @@ model TaskSubmission {
 
   user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   task                 Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, status])
+  @@index([taskId, status])
 }
 
 model TaskUnlockTransaction {
@@ -206,6 +214,9 @@ model WalletTransaction {
   createdAt       DateTime @default(now())
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, transactionType, status])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model DepositRequest {
@@ -223,6 +234,9 @@ model DepositRequest {
   updatedAt            DateTime @updatedAt
 
   user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model WithdrawalRequest {
@@ -243,6 +257,10 @@ model WithdrawalRequest {
   updatedAt           DateTime @updatedAt
 
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([approvalStatus, createdAt(sort: Desc)])
+  @@index([paymentStatus])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model Referral {
@@ -334,6 +352,8 @@ model Notification {
   createdAt        DateTime @default(now())
 
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
 }
 
 model Announcement {
@@ -360,6 +380,9 @@ model AdminAuditLog {
   reason        String?
   ipAddress     String?
   createdAt     DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([action])
 }
 
 model SiteSetting {

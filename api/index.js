@@ -76043,6 +76043,230 @@ router11.get("/submissions", requireAdmin, async (req, res, next) => {
     next(err);
   }
 });
+async function executeReviewSubmissionCore(params) {
+  const { submissionId, action, admin, reviewNotes, rejectionReason, ipAddress } = params;
+  const submission = await prisma.taskSubmission.findUnique({
+    where: { id: submissionId },
+    include: {
+      task: { include: { level: true } },
+      user: true
+    }
+  });
+  if (!submission) throw new Error("Submission not found");
+  if (submission.status !== "PENDING") {
+    throw new Error(`This submission has already been reviewed (Status: ${submission.status})`);
+  }
+  const { user, task } = submission;
+  if (action === "APPROVE") {
+    const isPrepaidTask = Boolean(
+      task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
+    );
+    const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
+    const taskRewardToAdd = Number(task.rewardAmount || 0);
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedSub2 = await tx.taskSubmission.update({
+        where: { id: submissionId },
+        data: {
+          status: "APPROVED",
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: reviewNotes || null
+        }
+      });
+      const existingProgress = await tx.userTaskProgress.findUnique({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } }
+      });
+      const wasAlreadyApproved = existingProgress?.status === "APPROVED";
+      await tx.userTaskProgress.upsert({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } },
+        update: {
+          status: "APPROVED",
+          approvedAt: /* @__PURE__ */ new Date(),
+          reviewerId: admin.id
+        },
+        create: {
+          userId: user.id,
+          taskId: task.id,
+          status: "APPROVED",
+          approvedAt: /* @__PURE__ */ new Date(),
+          reviewerId: admin.id
+        }
+      });
+      await tx.taskSubmission.updateMany({
+        where: {
+          userId: user.id,
+          taskId: task.id,
+          status: "PENDING",
+          id: { not: submissionId }
+        },
+        data: {
+          status: "APPROVED",
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: "Auto-resolved with task approval"
+        }
+      });
+      let updatedWallet2 = await tx.wallet.findUnique({ where: { userId: user.id } });
+      if (!wasAlreadyApproved) {
+        const walletUpdateData = {
+          creditPoints: { increment: creditPointsToAdd }
+        };
+        if (taskRewardToAdd > 0) {
+          walletUpdateData.availableBalance = { increment: taskRewardToAdd };
+          walletUpdateData.totalEarned = { increment: taskRewardToAdd };
+        }
+        updatedWallet2 = await tx.wallet.update({
+          where: { userId: user.id },
+          data: walletUpdateData
+        });
+        if (taskRewardToAdd > 0) {
+          await tx.walletTransaction.create({
+            data: {
+              userId: user.id,
+              transactionType: "TASK_REWARD",
+              amount: taskRewardToAdd,
+              currency: "PKR",
+              status: "COMPLETED",
+              relatedEntityId: task.id,
+              actorId: admin.id,
+              actorName: admin.username,
+              reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
+              notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet2.availableBalance.toLocaleString()}`
+            }
+          });
+        }
+      }
+      const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : "";
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points \u{1F389}`,
+          message: `Your task "${task.title}" was approved by administrator ${admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
+          notificationType: "TASK_STATUS"
+        }
+      });
+      const requiredCount = task.level.requiredTaskCount || 10;
+      const approvedTasksInLevel = await tx.taskSubmission.count({
+        where: {
+          userId: user.id,
+          task: { levelId: task.levelId },
+          status: "APPROVED"
+        }
+      });
+      const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
+      if (isLevelFullyCompleted) {
+        const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
+        const existingEntitlement = await tx.userSpinEntitlement.findFirst({
+          where: {
+            userId: user.id,
+            levelNumber: task.level.levelNumber
+          }
+        });
+        if (!existingEntitlement) {
+          await tx.userSpinEntitlement.create({
+            data: {
+              userId: user.id,
+              levelNumber: task.level.levelNumber,
+              taskNumber: requiredCount,
+              triggerReason: milestoneReason,
+              totalSpins: 1,
+              remainingSpins: 1,
+              isEligible: false,
+              requiresAdminReview: true,
+              adminReviewed: false,
+              assignedPrizeId: null
+            }
+          });
+          await tx.notification.create({
+            data: {
+              userId: user.id,
+              title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
+              message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
+              notificationType: "SPIN_REWARD"
+            }
+          });
+        }
+      }
+      return { updatedSub: updatedSub2, updatedWallet: updatedWallet2 };
+    });
+    const { updatedSub, updatedWallet } = result;
+    await Promise.all([
+      taskProgressionService.updateLevelProgress(user.id, task.levelId),
+      affiliateService.checkAndQualifyReferral(user.id, "TASK_APPROVED")
+    ]);
+    logAdminAction({
+      adminId: admin.id,
+      adminUsername: admin.username,
+      action: "TASK_SUBMISSION_APPROVED",
+      entityType: "TaskSubmission",
+      entityId: submissionId,
+      newState: {
+        status: "APPROVED",
+        rewardAmount: task.rewardAmount,
+        creditPoints: creditPointsToAdd,
+        newBalance: updatedWallet.availableBalance
+      },
+      reason: reviewNotes,
+      ipAddress
+    }).catch((e) => console.error("Admin audit log error:", e));
+    sendUserLiveCommand(user.id, "wallet", {
+      availableBalance: updatedWallet.availableBalance,
+      totalEarned: updatedWallet.totalEarned,
+      creditPoints: updatedWallet.creditPoints
+    });
+    sendUserLiveCommand(user.id, "task", { submissionId, taskId: task.id, status: "APPROVED" });
+    sendUserLiveCommand(user.id, "refresh", { type: "TASK_APPROVED" });
+    return { updatedSub, updatedWallet };
+  } else {
+    const updatedSub = await prisma.$transaction(async (tx) => {
+      const sub = await tx.taskSubmission.update({
+        where: { id: submissionId },
+        data: {
+          status: "REJECTED",
+          reviewerId: admin.id,
+          reviewerName: admin.username,
+          reviewNotes: reviewNotes || null,
+          rejectionReason: rejectionReason || "Verification requirements not satisfied"
+        }
+      });
+      await tx.userTaskProgress.upsert({
+        where: { userId_taskId: { userId: user.id, taskId: task.id } },
+        update: {
+          status: "REJECTED",
+          rejectionReason: rejectionReason || "Verification requirements not satisfied"
+        },
+        create: {
+          userId: user.id,
+          taskId: task.id,
+          status: "REJECTED",
+          rejectionReason: rejectionReason || "Verification requirements not satisfied"
+        }
+      });
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          title: `Task Submission Rejected \u274C`,
+          message: `Your submission for "${task.title}" was rejected. Reason: ${rejectionReason || "Please resubmit with clear proof."}`,
+          notificationType: "TASK_STATUS"
+        }
+      });
+      return sub;
+    });
+    logAdminAction({
+      adminId: admin.id,
+      adminUsername: admin.username,
+      action: "TASK_SUBMISSION_REJECTED",
+      entityType: "TaskSubmission",
+      entityId: submissionId,
+      newState: { status: "REJECTED", rejectionReason },
+      reason: reviewNotes,
+      ipAddress
+    }).catch((e) => console.error("Admin audit log error:", e));
+    sendUserLiveCommand(user.id, "task", { submissionId, taskId: task.id, status: "REJECTED" });
+    sendUserLiveCommand(user.id, "refresh", { type: "TASK_REJECTED" });
+    return { updatedSub };
+  }
+}
 router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res, next) => {
   try {
     const submissionId = req.params.submissionId;
@@ -76051,224 +76275,58 @@ router11.put("/submissions/:submissionId/review", requireAdmin, async (req, res,
       reviewNotes: external_exports.string().optional(),
       rejectionReason: external_exports.string().optional()
     }).parse(req.body);
-    const submission = await prisma.taskSubmission.findUnique({
-      where: { id: submissionId },
-      include: {
-        task: { include: { level: true } },
-        user: true
-      }
+    const result = await executeReviewSubmissionCore({
+      submissionId,
+      action,
+      admin: { id: req.admin.id, username: req.admin.username },
+      reviewNotes,
+      rejectionReason,
+      ipAddress: req.ip
     });
-    if (!submission) return res.status(404).json({ error: "Submission not found" });
-    if (submission.status !== "PENDING") {
-      return res.status(400).json({ error: `This submission has already been reviewed (Status: ${submission.status})` });
-    }
-    const { user, task } = submission;
     if (action === "APPROVE") {
-      const isPrepaidTask = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
-      );
-      const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
-      const taskRewardToAdd = Number(task.rewardAmount || 0);
-      const result = await prisma.$transaction(async (tx) => {
-        const updatedSub2 = await tx.taskSubmission.update({
-          where: { id: submissionId },
-          data: {
-            status: "APPROVED",
-            reviewerId: req.admin.id,
-            reviewerName: req.admin.username,
-            reviewNotes: reviewNotes || null
-          }
-        });
-        const existingProgress = await tx.userTaskProgress.findUnique({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } }
-        });
-        const wasAlreadyApproved = existingProgress?.status === "APPROVED";
-        await tx.userTaskProgress.upsert({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-          update: {
-            status: "APPROVED",
-            approvedAt: /* @__PURE__ */ new Date(),
-            reviewerId: req.admin.id
-          },
-          create: {
-            userId: user.id,
-            taskId: task.id,
-            status: "APPROVED",
-            approvedAt: /* @__PURE__ */ new Date(),
-            reviewerId: req.admin.id
-          }
-        });
-        await tx.taskSubmission.updateMany({
-          where: {
-            userId: user.id,
-            taskId: task.id,
-            status: "PENDING",
-            id: { not: submissionId }
-          },
-          data: {
-            status: "APPROVED",
-            reviewerId: req.admin.id,
-            reviewerName: req.admin.username,
-            reviewNotes: "Auto-resolved with task approval"
-          }
-        });
-        let updatedWallet2 = await tx.wallet.findUnique({ where: { userId: user.id } });
-        if (!wasAlreadyApproved) {
-          const walletUpdateData = {
-            creditPoints: { increment: creditPointsToAdd }
-          };
-          if (taskRewardToAdd > 0) {
-            walletUpdateData.availableBalance = { increment: taskRewardToAdd };
-            walletUpdateData.totalEarned = { increment: taskRewardToAdd };
-          }
-          updatedWallet2 = await tx.wallet.update({
-            where: { userId: user.id },
-            data: walletUpdateData
-          });
-          if (taskRewardToAdd > 0) {
-            await tx.walletTransaction.create({
-              data: {
-                userId: user.id,
-                transactionType: "TASK_REWARD",
-                amount: taskRewardToAdd,
-                currency: "PKR",
-                status: "COMPLETED",
-                relatedEntityId: task.id,
-                actorId: req.admin.id,
-                actorName: req.admin.username,
-                reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
-                notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet2.availableBalance.toLocaleString()}`
-              }
-            });
-          }
-        }
-        const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : "";
-        await tx.notification.create({
-          data: {
-            userId: user.id,
-            title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points \u{1F389}`,
-            message: `Your task "${task.title}" was approved by administrator ${req.admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
-            notificationType: "TASK_STATUS"
-          }
-        });
-        const requiredCount = task.level.requiredTaskCount || 10;
-        const approvedTasksInLevel = await tx.taskSubmission.count({
-          where: {
-            userId: user.id,
-            task: { levelId: task.levelId },
-            status: "APPROVED"
-          }
-        });
-        const isLevelFullyCompleted = approvedTasksInLevel >= requiredCount;
-        if (isLevelFullyCompleted) {
-          const milestoneReason = `Level ${task.level.levelNumber} Completion Free Spin`;
-          const existingEntitlement = await tx.userSpinEntitlement.findFirst({
-            where: {
-              userId: user.id,
-              levelNumber: task.level.levelNumber
-            }
-          });
-          if (!existingEntitlement) {
-            await tx.userSpinEntitlement.create({
-              data: {
-                userId: user.id,
-                levelNumber: task.level.levelNumber,
-                taskNumber: requiredCount,
-                triggerReason: milestoneReason,
-                totalSpins: 1,
-                remainingSpins: 1,
-                isEligible: false,
-                // Goes to admin first to assign the prize outcome
-                requiresAdminReview: true,
-                adminReviewed: false,
-                assignedPrizeId: null
-              }
-            });
-            await tx.notification.create({
-              data: {
-                userId: user.id,
-                title: `Level ${task.level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
-                message: `Congratulations! Completing Level ${task.level.levelNumber} earned you a Free Royal Spin! Your entitlement is submitted to administration to assign your reward.`,
-                notificationType: "SPIN_REWARD"
-              }
-            });
-          }
-        }
-        return { updatedSub: updatedSub2, updatedWallet: updatedWallet2 };
-      });
-      const { updatedSub, updatedWallet } = result;
-      await taskProgressionService.updateLevelProgress(user.id, task.levelId);
-      await affiliateService.checkAndQualifyReferral(user.id, "TASK_APPROVED");
-      await logAdminAction({
-        adminId: req.admin.id,
-        adminUsername: req.admin.username,
-        action: "TASK_SUBMISSION_APPROVED",
-        entityType: "TaskSubmission",
-        entityId: submissionId,
-        newState: {
-          status: "APPROVED",
-          rewardAmount: task.rewardAmount,
-          creditPoints: creditPointsToAdd,
-          newBalance: updatedWallet.availableBalance
-        },
-        reason: reviewNotes,
-        ipAddress: req.ip
-      });
-      sendUserLiveCommand(user.id, "wallet", {
-        availableBalance: updatedWallet.availableBalance,
-        totalEarned: updatedWallet.totalEarned,
-        creditPoints: updatedWallet.creditPoints
-      });
-      sendUserLiveCommand(user.id, "task", { submissionId, taskId: task.id, status: "APPROVED" });
-      sendUserLiveCommand(user.id, "refresh", { type: "TASK_APPROVED" });
-      res.json({ message: "Task approved and reward credited successfully!", submission: updatedSub, wallet: updatedWallet });
+      res.json({ message: "Task approved and reward credited successfully!", submission: result.updatedSub, wallet: result.updatedWallet });
     } else {
-      const updatedSub = await prisma.$transaction(async (tx) => {
-        const sub = await tx.taskSubmission.update({
-          where: { id: submissionId },
-          data: {
-            status: "REJECTED",
-            reviewerId: req.admin.id,
-            reviewerName: req.admin.username,
-            reviewNotes: reviewNotes || null,
-            rejectionReason: rejectionReason || "Verification requirements not satisfied"
-          }
-        });
-        await tx.userTaskProgress.upsert({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-          update: {
-            status: "REJECTED",
-            rejectionReason: rejectionReason || "Verification requirements not satisfied"
-          },
-          create: {
-            userId: user.id,
-            taskId: task.id,
-            status: "REJECTED",
-            rejectionReason: rejectionReason || "Verification requirements not satisfied"
-          }
-        });
-        await tx.notification.create({
-          data: {
-            userId: user.id,
-            title: `Task Submission Rejected \u274C`,
-            message: `Your submission for "${task.title}" was rejected. Reason: ${rejectionReason || "Please resubmit with clear proof."}`,
-            notificationType: "TASK_STATUS"
-          }
-        });
-        return sub;
-      });
-      await logAdminAction({
-        adminId: req.admin.id,
-        adminUsername: req.admin.username,
-        action: "TASK_SUBMISSION_REJECTED",
-        entityType: "TaskSubmission",
-        entityId: submissionId,
-        newState: { status: "REJECTED", rejectionReason },
-        reason: reviewNotes,
-        ipAddress: req.ip
-      });
-      res.json({ message: "Task submission rejected.", submission: updatedSub });
+      res.json({ message: "Task submission rejected.", submission: result.updatedSub });
     }
+  } catch (err) {
+    next(err);
+  }
+});
+router11.post("/submissions/batch-review", requireAdmin, async (req, res, next) => {
+  try {
+    const { submissionIds, action, reviewNotes, rejectionReason } = external_exports.object({
+      submissionIds: external_exports.array(external_exports.string()).min(1, "Select at least one submission"),
+      action: external_exports.enum(["APPROVE", "REJECT"]),
+      reviewNotes: external_exports.string().optional(),
+      rejectionReason: external_exports.string().optional()
+    }).parse(req.body);
+    const results = [];
+    const chunkSize = 10;
+    for (let i = 0; i < submissionIds.length; i += chunkSize) {
+      const chunk = submissionIds.slice(i, i + chunkSize);
+      await Promise.all(
+        chunk.map(async (id) => {
+          try {
+            await executeReviewSubmissionCore({
+              submissionId: id,
+              action,
+              admin: { id: req.admin.id, username: req.admin.username },
+              reviewNotes,
+              rejectionReason,
+              ipAddress: req.ip
+            });
+            results.push({ id, success: true });
+          } catch (err) {
+            results.push({ id, success: false, error: err.message });
+          }
+        })
+      );
+    }
+    const successCount = results.filter((r) => r.success).length;
+    res.json({
+      message: `Batch complete: ${successCount} of ${submissionIds.length} submissions ${action.toLowerCase()}d successfully.`,
+      results
+    });
   } catch (err) {
     next(err);
   }
@@ -77056,8 +77114,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-Cz91OXiQ.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-vffwWdA8.css">
+    <script type="module" crossorigin src="/assets/main-BqR_UK7n.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-DDFCRESn.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -77139,11 +77197,11 @@ function createApp() {
   app2.use(import_express12.default.static(path2.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-Cz91OXiQ.js")) {
-        return res.redirect(302, "/assets/main-Cz91OXiQ.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-BqR_UK7n.js")) {
+        return res.redirect(302, "/assets/main-BqR_UK7n.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-vffwWdA8.css")) {
-        return res.redirect(302, "/assets/main-vffwWdA8.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-DDFCRESn.css")) {
+        return res.redirect(302, "/assets/main-DDFCRESn.css");
       }
       return res.status(404).end();
     }
