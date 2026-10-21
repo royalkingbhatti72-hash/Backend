@@ -62,7 +62,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
       const lp = levelProgressMap.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
 
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
+      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10);
       const isUnlocked = lvl.levelNumber === 1 || previousLevelCompleted;
 
       levelsWithProgress.push({
