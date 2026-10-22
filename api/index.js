@@ -75321,7 +75321,14 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
       prisma2.spinHistory.count({ where: { rewardStatus: "PENDING" } }),
       prisma2.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
       prisma2.depositRequest.count({ where: { status: "PENDING" } }),
-      prisma2.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } })
+      prisma2.withdrawalRequest.count({
+        where: {
+          OR: [
+            { approvalStatus: "PENDING" },
+            { approvalStatus: "APPROVED", paymentStatus: "NOT_SENT" }
+          ]
+        }
+      })
     ]);
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
     const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals;
@@ -77130,8 +77137,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-Di5p-eZi.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-RsLG5AaD.css">
+    <script type="module" crossorigin src="/assets/main-XkjKVoLe.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-Dd4xDWgh.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -77265,11 +77272,11 @@ function createApp() {
   app2.use(import_express12.default.static(path2.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-Di5p-eZi.js")) {
-        return res.redirect(302, "/assets/main-Di5p-eZi.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-XkjKVoLe.js")) {
+        return res.redirect(302, "/assets/main-XkjKVoLe.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-RsLG5AaD.css")) {
-        return res.redirect(302, "/assets/main-RsLG5AaD.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-Dd4xDWgh.css")) {
+        return res.redirect(302, "/assets/main-Dd4xDWgh.css");
       }
       return res.status(404).end();
     }

@@ -89,7 +89,14 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
       prisma.spinHistory.count({ where: { rewardStatus: 'PENDING' } }),
       prisma.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
       prisma.depositRequest.count({ where: { status: 'PENDING' } }),
-      prisma.withdrawalRequest.count({ where: { approvalStatus: 'PENDING' } }),
+      prisma.withdrawalRequest.count({
+        where: {
+          OR: [
+            { approvalStatus: 'PENDING' },
+            { approvalStatus: 'APPROVED', paymentStatus: 'NOT_SENT' },
+          ],
+        },
+      }),
     ]);
 
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
