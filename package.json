@@ -4,7 +4,8 @@
   "description": "Earn Street - Backend API Server",
   "type": "module",
   "scripts": {
-    "build": "prisma generate && esbuild src/serverless.ts --bundle --platform=node --target=node20 --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js --external:@prisma/client",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && esbuild src/serverless.ts --bundle --platform=node --target=node20 --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js --external:@prisma/client || prisma generate",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "prisma:generate": "prisma generate",
@@ -23,6 +24,7 @@
     "express": "^5.3.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.12.1",
+    "prisma": "^6.19.3",
     "zod": "^4.6.6"
   },
   "devDependencies": {
@@ -33,7 +35,6 @@
     "@types/morgan": "^1.9.10",
     "@types/node": "^26.6.5",
     "@types/supertest": "^7.2.1",
-    "prisma": "^6.19.3",
     "supertest": "^7.3.1",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
