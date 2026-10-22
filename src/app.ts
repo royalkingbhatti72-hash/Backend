@@ -68,6 +68,85 @@ export function createApp() {
     next();
   });
 
+  // Maintenance mode cache & checker
+  let maintenanceCache: {
+    enabled: boolean;
+    expectedEnd: string | null;
+    title: string;
+    message: string;
+    timestamp: number;
+  } | null = null;
+  const MAINTENANCE_CACHE_TTL = 3000;
+
+  const isMaintenanceActive = async () => {
+    const now = Date.now();
+    if (maintenanceCache && now - maintenanceCache.timestamp < MAINTENANCE_CACHE_TTL) {
+      return maintenanceCache;
+    }
+    try {
+      const records = await prisma.siteSetting.findMany({
+        where: {
+          key: {
+            in: [
+              'maintenance_mode',
+              'maintenance_expected_end',
+              'maintenance_title',
+              'maintenance_message',
+            ],
+          },
+        },
+      });
+      const map = Object.fromEntries(records.map((r) => [r.key, r.value]));
+      maintenanceCache = {
+        enabled: map.maintenance_mode === 'true',
+        expectedEnd: map.maintenance_expected_end || null,
+        title: map.maintenance_title || 'System Maintenance in Progress',
+        message:
+          map.maintenance_message ||
+          'We are currently performing scheduled maintenance to optimize system performance. Service will resume shortly. All account data and balances are secure.',
+        timestamp: now,
+      };
+      return maintenanceCache;
+    } catch {
+      return maintenanceCache || { enabled: false, expectedEnd: null, title: '', message: '', timestamp: now };
+    }
+  };
+
+  // Maintenance guard: block regular member API access when maintenance mode is active
+  app.use(async (req, res, next) => {
+    const reqPath = req.path || '';
+
+    // Always exempt Admin portal, settings, health, root status, and static assets
+    if (
+      reqPath.startsWith('/api/admin') ||
+      reqPath.startsWith('/adminpanal') ||
+      reqPath.startsWith('/api/settings') ||
+      reqPath === '/api/health' ||
+      reqPath === '/api' ||
+      reqPath === '/api/index' ||
+      reqPath.startsWith('/assets') ||
+      reqPath.startsWith('/images') ||
+      reqPath === '/favicon.ico'
+    ) {
+      return next();
+    }
+
+    if (reqPath.startsWith('/api/')) {
+      const status = await isMaintenanceActive();
+      if (status.enabled) {
+        return res.status(503).json({
+          error: 'Service Temporarily Unavailable (Scheduled Maintenance)',
+          maintenance: true,
+          expectedEnd: status.expectedEnd,
+          title: status.title,
+          message: status.message,
+        });
+      }
+    }
+
+    next();
+  });
+
   // API Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/user', userRoutes);
@@ -114,11 +193,11 @@ export function createApp() {
   // Graceful fallback for stale or missing assets
   app.use('/assets', (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD') {
-      if (req.path.endsWith('.js') && !req.path.includes('main-BCSYVBFp.js')) {
-        return res.redirect(302, '/assets/main-BCSYVBFp.js');
+      if (req.path.endsWith('.js') && !req.path.includes('main-BNR59AhC.js')) {
+        return res.redirect(302, '/assets/main-BNR59AhC.js');
       }
-      if (req.path.endsWith('.css') && !req.path.includes('main-CQZKpbHk.css')) {
-        return res.redirect(302, '/assets/main-CQZKpbHk.css');
+      if (req.path.endsWith('.css') && !req.path.includes('main-RsLG5AaD.css')) {
+        return res.redirect(302, '/assets/main-RsLG5AaD.css');
       }
       return res.status(404).end();
     }

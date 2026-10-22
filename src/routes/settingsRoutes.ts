@@ -28,6 +28,10 @@ router.get('/public', async (req, res, next) => {
             'affiliate_gold_target',
             'affiliate_share_template',
             'support_telegram',
+            'maintenance_mode',
+            'maintenance_expected_end',
+            'maintenance_title',
+            'maintenance_message',
           ],
         },
       },
@@ -51,6 +55,12 @@ router.get('/public', async (req, res, next) => {
       silverTarget: parseInt(settingsMap.affiliate_silver_target || '15', 10),
       goldTarget: parseInt(settingsMap.affiliate_gold_target || '30', 10),
       affiliateShareTemplate: settingsMap.affiliate_share_template || '',
+      maintenanceMode: settingsMap.maintenance_mode === 'true',
+      maintenanceExpectedEnd: settingsMap.maintenance_expected_end || null,
+      maintenanceTitle: settingsMap.maintenance_title || 'System Maintenance in Progress',
+      maintenanceMessage:
+        settingsMap.maintenance_message ||
+        'We are currently performing scheduled maintenance to optimize system performance. Service will resume shortly. All account data and balances are secure.',
     });
   } catch (err) {
     next(err);
