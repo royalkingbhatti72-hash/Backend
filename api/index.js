@@ -64775,10 +64775,10 @@ function date4(params) {
 // src/prisma.ts
 import { PrismaClient } from "@prisma/client";
 var globalForPrisma = globalThis;
-var prisma2 = globalForPrisma.prisma ?? new PrismaClient({
+var prisma = globalForPrisma.prisma ?? new PrismaClient({
   log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"]
 });
-if (!globalForPrisma.prisma) globalForPrisma.prisma = prisma2;
+if (!globalForPrisma.prisma) globalForPrisma.prisma = prisma;
 
 // src/config.ts
 var import_dotenv = __toESM(require_dist4(), 1);
@@ -64801,7 +64801,7 @@ async function requireAuth(req, res, next) {
     }
     const token = authHeader.split(" ")[1];
     const decoded = import_jsonwebtoken.default.verify(token, config2.jwtSecret);
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
         id: true,
@@ -64841,7 +64841,7 @@ var affiliateService = {
       "affiliate_auto_payout",
       "affiliate_anti_fraud"
     ];
-    const settings = await prisma2.siteSetting.findMany({
+    const settings = await prisma.siteSetting.findMany({
       where: { key: { in: keys } }
     });
     const map2 = Object.fromEntries(settings.map((s) => [s.key, s.value]));
@@ -64866,7 +64866,7 @@ var affiliateService = {
     if (referrerId === refereeId) return;
     const isInstant = settings.qualifyingCondition === "INSTANT_ON_REGISTRATION";
     if (isInstant) {
-      await prisma2.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx) => {
         await tx.referral.upsert({
           where: { referrerId_referredId: { referrerId, referredId: refereeId } },
           update: {
@@ -64904,7 +64904,7 @@ var affiliateService = {
       });
       await this.checkAmbassadorMilestones(referrerId);
     } else {
-      await prisma2.referral.upsert({
+      await prisma.referral.upsert({
         where: { referrerId_referredId: { referrerId, referredId: refereeId } },
         update: {
           qualifyingStatus: "PENDING",
@@ -64928,7 +64928,7 @@ var affiliateService = {
   async checkAndQualifyReferral(refereeUserId, triggerType) {
     const settings = await this.getSettings();
     if (!settings.affiliateProgramEnabled) return;
-    const referral = await prisma2.referral.findFirst({
+    const referral = await prisma.referral.findFirst({
       where: {
         referredId: refereeUserId,
         qualifyingStatus: "PENDING"
@@ -64945,7 +64945,7 @@ var affiliateService = {
     }
     if (!shouldQualify) return;
     const referrerId = referral.referrerId;
-    await prisma2.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
       await tx.referral.update({
         where: { id: referral.id },
         data: {
@@ -64981,7 +64981,7 @@ var affiliateService = {
    */
   async checkAmbassadorMilestones(referrerId) {
     const settings = await this.getSettings();
-    const qualifiedCount = await prisma2.referral.count({
+    const qualifiedCount = await prisma.referral.count({
       where: {
         referrerId,
         qualifyingStatus: "QUALIFIED"
@@ -64989,14 +64989,14 @@ var affiliateService = {
     });
     if (qualifiedCount >= settings.silverTarget) {
       const entitlementReason = `Silver Ambassador Milestone (${settings.silverTarget} Qualified Partners)`;
-      const existingSpin = await prisma2.userSpinEntitlement.findFirst({
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId: referrerId,
           triggerReason: entitlementReason
         }
       });
       if (!existingSpin) {
-        await prisma2.userSpinEntitlement.create({
+        await prisma.userSpinEntitlement.create({
           data: {
             userId: referrerId,
             triggerReason: entitlementReason,
@@ -65008,7 +65008,7 @@ var affiliateService = {
             adminReviewed: false
           }
         });
-        await prisma2.notification.create({
+        await prisma.notification.create({
           data: {
             userId: referrerId,
             title: `Silver Ambassador Rank Achieved! \u{1F948}`,
@@ -65020,14 +65020,14 @@ var affiliateService = {
     }
     if (qualifiedCount >= settings.goldTarget) {
       const goldSpinReason = `Gold Ambassador Milestone (${settings.goldTarget} Qualified Partners)`;
-      const existingSpin = await prisma2.userSpinEntitlement.findFirst({
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId: referrerId,
           triggerReason: goldSpinReason
         }
       });
       if (!existingSpin) {
-        await prisma2.userSpinEntitlement.create({
+        await prisma.userSpinEntitlement.create({
           data: {
             userId: referrerId,
             triggerReason: goldSpinReason,
@@ -65038,7 +65038,7 @@ var affiliateService = {
             adminReviewed: true
           }
         });
-        await prisma2.notification.create({
+        await prisma.notification.create({
           data: {
             userId: referrerId,
             title: `Gold Ambassador Crowned! +3 Free Spins Awarded \u{1F451}`,
@@ -65083,28 +65083,28 @@ router.post("/register", async (req, res, next) => {
     if (!trimmedRefCode) {
       return res.status(400).json({ error: "A valid referral code is required to register. Registration is invite-only." });
     }
-    const referrer = await prisma2.user.findUnique({
+    const referrer = await prisma.user.findUnique({
       where: { referralCode: trimmedRefCode }
     });
     if (!referrer) {
       return res.status(400).json({ error: "Invalid referral code provided. You must enter a valid inviter code to register." });
     }
-    const existingUser = await prisma2.user.findUnique({
+    const existingUser = await prisma.user.findUnique({
       where: { phone: normalizedPhone }
     });
     if (existingUser) {
       return res.status(400).json({ error: "A user with this phone number is already registered" });
     }
     let userReferralCode = generateReferralCode(validated.name);
-    let codeExists = await prisma2.user.findUnique({ where: { referralCode: userReferralCode } });
+    let codeExists = await prisma.user.findUnique({ where: { referralCode: userReferralCode } });
     let attempts = 0;
     while (codeExists && attempts < 5) {
       userReferralCode = generateReferralCode(validated.name);
-      codeExists = await prisma2.user.findUnique({ where: { referralCode: userReferralCode } });
+      codeExists = await prisma.user.findUnique({ where: { referralCode: userReferralCode } });
       attempts++;
     }
     const passwordHash = await bcryptjs_default.hash(validated.password, 10);
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           name: validated.name.trim(),
@@ -65161,7 +65161,7 @@ router.post("/login", async (req, res, next) => {
   try {
     const validated = loginSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { phone: normalizedPhone },
       include: { wallet: true }
     });
@@ -65195,7 +65195,7 @@ router.post("/login", async (req, res, next) => {
 });
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: {
         id: true,
@@ -65227,7 +65227,7 @@ var router2 = (0, import_express2.Router)();
 router2.get("/dashboard", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
         wallet: true
@@ -65246,8 +65246,8 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       recentTransactions,
       recentSubmissions
     ] = await Promise.all([
-      prisma2.level.findMany({ orderBy: { levelNumber: "asc" } }),
-      prisma2.userTaskProgress.findMany({
+      prisma.level.findMany({ orderBy: { levelNumber: "asc" } }),
+      prisma.userTaskProgress.findMany({
         where: { userId, status: "APPROVED" },
         select: {
           task: {
@@ -65263,21 +65263,21 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
           }
         }
       }),
-      prisma2.walletTransaction.aggregate({
+      prisma.walletTransaction.aggregate({
         where: { userId, transactionType: "TASK_REWARD", status: "COMPLETED" },
         _sum: { amount: true }
       }),
-      prisma2.referral.count({ where: { referrerId: userId } }),
-      prisma2.userSpinEntitlement.findFirst({
+      prisma.referral.count({ where: { referrerId: userId } }),
+      prisma.userSpinEntitlement.findFirst({
         where: { userId, isEligible: true, remainingSpins: { gt: 0 } }
       }),
-      prisma2.notification.count({ where: { userId, isRead: false } }),
-      prisma2.walletTransaction.findMany({
+      prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.walletTransaction.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },
         take: 5
       }),
-      prisma2.taskSubmission.findMany({
+      prisma.taskSubmission.findMany({
         where: { userId },
         include: { task: { select: { title: true, taskNumber: true, rewardAmount: true } } },
         orderBy: { createdAt: "desc" },
@@ -65329,7 +65329,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
     }, 0);
     let creditPoints = user.wallet?.creditPoints ?? 0;
     if (calculatedCreditPoints > creditPoints && allApprovedProgress.length > 0) {
-      const adminDeduction = await prisma2.adminAuditLog.findFirst({
+      const adminDeduction = await prisma.adminAuditLog.findFirst({
         where: {
           entityType: "Wallet",
           entityId: user.wallet?.id,
@@ -65337,7 +65337,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
         }
       });
       if (!adminDeduction) {
-        await prisma2.wallet.update({
+        await prisma.wallet.update({
           where: { userId },
           data: { creditPoints: calculatedCreditPoints }
         });
@@ -65402,7 +65402,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
 });
 router2.get("/profile", requireAuth, async (req, res, next) => {
   try {
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
         wallet: true,
@@ -65424,14 +65424,14 @@ router2.put("/profile/password", requireAuth, async (req, res, next) => {
       newPassword: external_exports.string().min(6, "New password must be at least 6 characters")
     });
     const validated = schema.parse(req.body);
-    const user = await prisma2.user.findUnique({ where: { id: req.user.id } });
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) return res.status(404).json({ error: "User not found" });
     const isValid = await bcryptjs_default.compare(validated.currentPassword, user.passwordHash);
     if (!isValid) {
       return res.status(400).json({ error: "Incorrect current password" });
     }
     const newHash = await bcryptjs_default.hash(validated.newPassword, 10);
-    await prisma2.user.update({
+    await prisma.user.update({
       where: { id: user.id },
       data: { passwordHash: newHash, mustChangePassword: false }
     });
@@ -65451,7 +65451,7 @@ var taskProgressionService = {
    * Evaluates sequential task progression for a user in a specific level
    */
   async getLevelTasksForUser(userId, levelNumber) {
-    const level = await prisma2.level.findUnique({
+    const level = await prisma.level.findUnique({
       where: { levelNumber },
       include: {
         tasks: {
@@ -65466,26 +65466,26 @@ var taskProgressionService = {
     if (levelNumber === 1) {
       isLevelUnlocked = true;
     } else {
-      const prevLevel = await prisma2.level.findUnique({
+      const prevLevel = await prisma.level.findUnique({
         where: { levelNumber: levelNumber - 1 }
       });
       if (prevLevel) {
         const [prevUserProgressCount, prevSubmissionsCount, prevLevelProgress] = await Promise.all([
-          prisma2.userTaskProgress.count({
+          prisma.userTaskProgress.count({
             where: {
               userId,
               task: { levelId: prevLevel.id },
               status: "APPROVED"
             }
           }),
-          prisma2.taskSubmission.count({
+          prisma.taskSubmission.count({
             where: {
               userId,
               task: { levelId: prevLevel.id },
               status: "APPROVED"
             }
           }),
-          prisma2.userLevelProgress.findUnique({
+          prisma.userLevelProgress.findUnique({
             where: { userId_levelId: { userId, levelId: prevLevel.id } }
           })
         ]);
@@ -65532,17 +65532,17 @@ var taskProgressionService = {
       };
     }
     const [wallet, userProgressRecords, submissions] = await Promise.all([
-      prisma2.wallet.findUnique({
+      prisma.wallet.findUnique({
         where: { userId },
         select: { availableBalance: true }
       }),
-      prisma2.userTaskProgress.findMany({
+      prisma.userTaskProgress.findMany({
         where: {
           userId,
           task: { levelId: level.id }
         }
       }),
-      prisma2.taskSubmission.findMany({
+      prisma.taskSubmission.findMany({
         where: {
           userId,
           task: { levelId: level.id }
@@ -65627,27 +65627,27 @@ var taskProgressionService = {
    * Recalculates and updates level progression for a user
    */
   async updateLevelProgress(userId, levelId) {
-    const level = await prisma2.level.findUnique({
+    const level = await prisma.level.findUnique({
       where: { id: levelId },
       include: { tasks: true }
     });
     if (!level) return null;
     const [userProgressCount, submissionsCount, userLevelProgress] = await Promise.all([
-      prisma2.userTaskProgress.count({
+      prisma.userTaskProgress.count({
         where: {
           userId,
           task: { levelId },
           status: "APPROVED"
         }
       }),
-      prisma2.taskSubmission.count({
+      prisma.taskSubmission.count({
         where: {
           userId,
           task: { levelId },
           status: "APPROVED"
         }
       }),
-      prisma2.userLevelProgress.findUnique({
+      prisma.userLevelProgress.findUnique({
         where: { userId_levelId: { userId, levelId } }
       })
     ]);
@@ -65657,7 +65657,7 @@ var taskProgressionService = {
       userLevelProgress?.approvedTaskCount || 0
     );
     const isCompleted = approvedCount >= (level.requiredTaskCount || 10);
-    const progress = await prisma2.userLevelProgress.upsert({
+    const progress = await prisma.userLevelProgress.upsert({
       where: {
         userId_levelId: { userId, levelId }
       },
@@ -65676,11 +65676,11 @@ var taskProgressionService = {
     });
     if (isCompleted && level.completionReward > 0) {
       const rewardKey = `LEVEL_REWARD_${level.id}_${userId}`;
-      const existing = await prisma2.walletTransaction.findUnique({
+      const existing = await prisma.walletTransaction.findUnique({
         where: { idempotencyKey: rewardKey }
       });
       if (!existing) {
-        await prisma2.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx) => {
           await tx.wallet.update({
             where: { userId },
             data: {
@@ -65715,14 +65715,14 @@ var taskProgressionService = {
       await affiliateService.checkAndQualifyReferral(userId, "LEVEL_1_COMPLETED");
     }
     if (isCompleted) {
-      const existingLevelSpin = await prisma2.userSpinEntitlement.findFirst({
+      const existingLevelSpin = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId,
           levelNumber: level.levelNumber
         }
       });
       if (!existingLevelSpin) {
-        await prisma2.userSpinEntitlement.create({
+        await prisma.userSpinEntitlement.create({
           data: {
             userId,
             levelNumber: level.levelNumber,
@@ -65736,7 +65736,7 @@ var taskProgressionService = {
             assignedPrizeId: null
           }
         });
-        await prisma2.notification.create({
+        await prisma.notification.create({
           data: {
             userId,
             title: `Level ${level.levelNumber} Completed! Free Spin Earned! \u{1F3A1}`,
@@ -73984,15 +73984,15 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
-      prisma2.level.findMany({ orderBy: { levelNumber: "asc" } }),
-      prisma2.userTaskProgress.findMany({
+      prisma.level.findMany({ orderBy: { levelNumber: "asc" } }),
+      prisma.userTaskProgress.findMany({
         where: { userId, status: "APPROVED" },
         select: { task: { select: { levelId: true, id: true } } }
       }),
-      prisma2.userLevelProgress.findMany({
+      prisma.userLevelProgress.findMany({
         where: { userId }
       }),
-      prisma2.taskSubmission.findMany({
+      prisma.taskSubmission.findMany({
         where: { userId, status: "APPROVED" },
         select: { task: { select: { levelId: true, id: true } } }
       })
@@ -74060,7 +74060,7 @@ router3.get("/levels/:levelNumber", requireAuth, async (req, res, next) => {
   }
 });
 async function findTaskByIdOrSynthetic(taskId) {
-  let task = await prisma2.task.findUnique({
+  let task = await prisma.task.findUnique({
     where: { id: taskId },
     include: { level: true }
   });
@@ -74069,9 +74069,9 @@ async function findTaskByIdOrSynthetic(taskId) {
   if (match) {
     const levelNumber = parseInt(match[1], 10);
     const taskNumber = parseInt(match[2], 10);
-    const level = await prisma2.level.findUnique({ where: { levelNumber } });
+    const level = await prisma.level.findUnique({ where: { levelNumber } });
     if (level) {
-      task = await prisma2.task.findUnique({
+      task = await prisma.task.findUnique({
         where: {
           levelId_taskNumber: {
             levelId: level.id,
@@ -74098,7 +74098,7 @@ router3.get("/:taskId", requireAuth, async (req, res, next) => {
     if (!evaluatedTask) {
       return res.status(404).json({ error: "Task evaluation failed" });
     }
-    const submissions = await prisma2.taskSubmission.findMany({
+    const submissions = await prisma.taskSubmission.findMany({
       where: { userId, taskId: task.id },
       orderBy: { createdAt: "desc" }
     });
@@ -74140,7 +74140,7 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "Prerequisite tasks must be approved before unlocking this task" });
     }
-    const wallet = await prisma2.wallet.findUnique({ where: { userId } });
+    const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.availableBalance < task.unlockFee) {
       const currentBal = wallet?.availableBalance || 0;
       const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
@@ -74152,7 +74152,7 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
         redirectToDeposit: true
       });
     }
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const unlockTx = await tx.taskUnlockTransaction.create({
         data: {
           userId,
@@ -74251,7 +74251,7 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
       return res.status(403).json({ error: evaluated.lockMessage || "This task is locked" });
     }
     if (task.isPaid) {
-      const wallet = await prisma2.wallet.findUnique({ where: { userId } });
+      const wallet = await prisma.wallet.findUnique({ where: { userId } });
       const currentBal = wallet?.availableBalance || 0;
       if (currentBal < task.unlockFee) {
         const remainingNeeded = Math.max(0, task.unlockFee - currentBal);
@@ -74264,7 +74264,7 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
         });
       }
     }
-    const submission = await prisma2.$transaction(async (tx) => {
+    const submission = await prisma.$transaction(async (tx) => {
       if (task.isPaid) {
         await tx.taskUnlockTransaction.create({
           data: {
@@ -74330,11 +74330,11 @@ var router4 = (0, import_express4.Router)();
 router4.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    let wallet = await prisma2.wallet.findUnique({
+    let wallet = await prisma.wallet.findUnique({
       where: { userId }
     });
     if (!wallet) {
-      wallet = await prisma2.wallet.create({
+      wallet = await prisma.wallet.create({
         data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, totalWithdrawn: 0, totalUnlockFees: 0 }
       });
     }
@@ -74350,13 +74350,13 @@ router4.get("/transactions", requireAuth, async (req, res, next) => {
     const limit = parseInt(req.query.limit || "20", 10);
     const skip = (page - 1) * limit;
     const [transactions, total] = await Promise.all([
-      prisma2.walletTransaction.findMany({
+      prisma.walletTransaction.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
-      prisma2.walletTransaction.count({
+      prisma.walletTransaction.count({
         where: { userId }
       })
     ]);
@@ -74386,7 +74386,7 @@ var depositSchema = external_exports.object({
 });
 router5.get("/instructions", requireAuth, async (req, res, next) => {
   try {
-    const settings = await prisma2.siteSetting.findMany({
+    const settings = await prisma.siteSetting.findMany({
       where: {
         key: {
           in: [
@@ -74448,7 +74448,7 @@ router5.get("/instructions", requireAuth, async (req, res, next) => {
 router5.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const deposits = await prisma2.depositRequest.findMany({
+    const deposits = await prisma.depositRequest.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" }
     });
@@ -74464,7 +74464,7 @@ router5.post("/", requireAuth, async (req, res, next) => {
     if (validated.amount < 1) {
       return res.status(400).json({ error: "Deposit amount must be at least PKR 1" });
     }
-    const existingRef = await prisma2.depositRequest.findFirst({
+    const existingRef = await prisma.depositRequest.findFirst({
       where: {
         transactionReference: validated.transactionReference.trim(),
         status: { in: ["PENDING", "APPROVED"] }
@@ -74473,7 +74473,7 @@ router5.post("/", requireAuth, async (req, res, next) => {
     if (existingRef) {
       return res.status(400).json({ error: "This transaction reference ID has already been submitted and is currently pending or approved." });
     }
-    const deposit = await prisma2.$transaction(async (tx) => {
+    const deposit = await prisma.$transaction(async (tx) => {
       const dep = await tx.depositRequest.create({
         data: {
           userId,
@@ -74517,20 +74517,20 @@ var withdrawalSchema = external_exports.object({
 router6.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const withdrawals = await prisma2.withdrawalRequest.findMany({
+    const withdrawals = await prisma.withdrawalRequest.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" }
     });
-    const levels = await prisma2.level.findMany({ orderBy: { levelNumber: "asc" } });
+    const levels = await prisma.level.findMany({ orderBy: { levelNumber: "asc" } });
     let completedLevelsCount = 0;
     for (const lvl of levels) {
-      const approvedCount = await prisma2.userTaskProgress.count({
+      const approvedCount = await prisma.userTaskProgress.count({
         where: { userId, task: { levelId: lvl.id }, status: "APPROVED" }
       });
       if (approvedCount >= 10) completedLevelsCount++;
     }
     const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
-    const wallet = await prisma2.wallet.findUnique({ where: { userId } });
+    const wallet = await prisma.wallet.findUnique({ where: { userId } });
     const availableBalance = wallet?.availableBalance || 0;
     const maxWithdrawableAmount = Math.floor(availableBalance * eligiblePercent / 100);
     res.json({
@@ -74550,7 +74550,7 @@ router6.post("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const validated = withdrawalSchema.parse(req.body);
-    const wallet = await prisma2.wallet.findUnique({ where: { userId } });
+    const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.availableBalance <= 0) {
       return res.status(400).json({
         error: "You have no available balance to withdraw."
@@ -74558,10 +74558,10 @@ router6.post("/", requireAuth, async (req, res, next) => {
     }
     let exactAvailable = wallet.availableBalance;
     if (process.env.NODE_ENV !== "test") {
-      const allLevels = await prisma2.level.findMany();
+      const allLevels = await prisma.level.findMany();
       let completedLevels = 0;
       for (const lvl of allLevels) {
-        const approved = await prisma2.userTaskProgress.count({
+        const approved = await prisma.userTaskProgress.count({
           where: { userId, task: { levelId: lvl.id }, status: "APPROVED" }
         });
         if (approved >= 10) completedLevels++;
@@ -74585,7 +74585,7 @@ router6.post("/", requireAuth, async (req, res, next) => {
         exactAvailable
       });
     }
-    const withdrawal = await prisma2.$transaction(async (tx) => {
+    const withdrawal = await prisma.$transaction(async (tx) => {
       const reqRecord = await tx.withdrawalRequest.create({
         data: {
           userId,
@@ -74718,10 +74718,10 @@ var OFFICIAL_SPIN_PRIZES = [
   }
 ];
 async function ensureOfficialSpinPrizes() {
-  const existing = await prisma2.spinPrize.findMany();
+  const existing = await prisma.spinPrize.findMany();
   if (existing.length === 0) {
     for (const p of OFFICIAL_SPIN_PRIZES) {
-      await prisma2.spinPrize.create({
+      await prisma.spinPrize.create({
         data: {
           ...p,
           status: "ACTIVE"
@@ -74747,7 +74747,7 @@ async function ensureOfficialSpinPrizes() {
         return false;
       });
       if (match) {
-        await prisma2.spinPrize.update({
+        await prisma.spinPrize.update({
           where: { id: match.id },
           data: {
             name: official.name,
@@ -74760,7 +74760,7 @@ async function ensureOfficialSpinPrizes() {
           }
         });
       } else {
-        await prisma2.spinPrize.create({
+        await prisma.spinPrize.create({
           data: {
             ...official,
             status: "ACTIVE"
@@ -74769,7 +74769,7 @@ async function ensureOfficialSpinPrizes() {
       }
     }
   }
-  const allActive = await prisma2.spinPrize.findMany({
+  const allActive = await prisma.spinPrize.findMany({
     where: { status: "ACTIVE" }
   });
   const orderedPrizes = OFFICIAL_SPIN_PRIZES.map((off) => {
@@ -74794,10 +74794,10 @@ var router7 = (0, import_express7.Router)();
 router7.get("/status", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const globalSpinSetting = await prisma2.siteSetting.findUnique({ where: { key: "spin_enabled" } });
+    const globalSpinSetting = await prisma.siteSetting.findUnique({ where: { key: "spin_enabled" } });
     const isGlobalSpinEnabled = globalSpinSetting ? globalSpinSetting.value === "true" : true;
     const prizes = await ensureOfficialSpinPrizes();
-    const entitlement = await prisma2.userSpinEntitlement.findFirst({
+    const entitlement = await prisma.userSpinEntitlement.findFirst({
       where: {
         userId,
         isEligible: true,
@@ -74807,13 +74807,13 @@ router7.get("/status", requireAuth, async (req, res, next) => {
         assignedPrize: true
       }
     });
-    const history = await prisma2.spinHistory.findMany({
+    const history = await prisma.spinHistory.findMany({
       where: { userId },
       include: { prize: true },
       orderBy: { createdAt: "desc" },
       take: 10
     });
-    const wonProducts = await prisma2.spinHistory.findMany({
+    const wonProducts = await prisma.spinHistory.findMany({
       where: {
         userId,
         prize: { prizeType: "PHYSICAL" }
@@ -74824,7 +74824,7 @@ router7.get("/status", requireAuth, async (req, res, next) => {
       },
       orderBy: { createdAt: "desc" }
     });
-    const pendingMilestone = await prisma2.userSpinEntitlement.findFirst({
+    const pendingMilestone = await prisma.userSpinEntitlement.findFirst({
       where: {
         userId,
         requiresAdminReview: true,
@@ -74832,7 +74832,7 @@ router7.get("/status", requireAuth, async (req, res, next) => {
         remainingSpins: { gt: 0 }
       }
     });
-    const level10Progress = await prisma2.userLevelProgress.findFirst({
+    const level10Progress = await prisma.userLevelProgress.findFirst({
       where: {
         userId,
         level: { levelNumber: 10 },
@@ -74864,11 +74864,11 @@ router7.get("/status", requireAuth, async (req, res, next) => {
 router7.post("/play", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const globalSpinSetting = await prisma2.siteSetting.findUnique({ where: { key: "spin_enabled" } });
+    const globalSpinSetting = await prisma.siteSetting.findUnique({ where: { key: "spin_enabled" } });
     if (globalSpinSetting && globalSpinSetting.value !== "true") {
       return res.status(403).json({ error: "The Royal Spin Wheel is currently paused by administration." });
     }
-    const entitlement = await prisma2.userSpinEntitlement.findFirst({
+    const entitlement = await prisma.userSpinEntitlement.findFirst({
       where: {
         userId,
         isEligible: true,
@@ -74879,7 +74879,7 @@ router7.post("/play", requireAuth, async (req, res, next) => {
       }
     });
     if (!entitlement || entitlement.remainingSpins <= 0) {
-      const pendingEntitlement = await prisma2.userSpinEntitlement.findFirst({
+      const pendingEntitlement = await prisma.userSpinEntitlement.findFirst({
         where: {
           userId,
           remainingSpins: { gt: 0 },
@@ -74903,7 +74903,7 @@ router7.post("/play", requireAuth, async (req, res, next) => {
     if (!selectedPrize || selectedPrize.status !== "ACTIVE") {
       selectedPrize = allActivePrizes[0];
     }
-    const spinResult = await prisma2.$transaction(async (tx) => {
+    const spinResult = await prisma.$transaction(async (tx) => {
       await tx.userSpinEntitlement.update({
         where: { id: entitlement.id },
         data: {
@@ -74974,21 +74974,21 @@ var router8 = (0, import_express8.Router)();
 router8.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { referralCode: true }
     });
     if (!user) return res.status(404).json({ error: "User not found" });
-    const levels = await prisma2.level.findMany({
+    const levels = await prisma.level.findMany({
       orderBy: { levelNumber: "asc" },
       select: { id: true, levelNumber: true, title: true, requiredTaskCount: true }
     });
-    const referrals = await prisma2.referral.findMany({
+    const referrals = await prisma.referral.findMany({
       where: { referrerId: userId },
       orderBy: { createdAt: "desc" }
     });
     const referredUserIds = referrals.map((r) => r.referredId);
-    const referredUsers = await prisma2.user.findMany({
+    const referredUsers = await prisma.user.findMany({
       where: { id: { in: referredUserIds } },
       select: {
         id: true,
@@ -75063,7 +75063,7 @@ router8.get("/", requireAuth, async (req, res, next) => {
     const totalReferrals = referrals.length;
     const qualifiedReferrals = detailedReferrals.filter((r) => r.isLevel1Completed || r.qualifyingStatus === "QUALIFIED").length;
     const pendingReferrals = Math.max(0, totalReferrals - qualifiedReferrals);
-    const spinsEarned = await prisma2.userSpinEntitlement.count({
+    const spinsEarned = await prisma.userSpinEntitlement.count({
       where: {
         userId,
         triggerReason: { contains: "Referral" }
@@ -75090,12 +75090,12 @@ var router9 = (0, import_express9.Router)();
 router9.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const notifications = await prisma2.notification.findMany({
+    const notifications = await prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
       take: 50
     });
-    const unreadCount = await prisma2.notification.count({
+    const unreadCount = await prisma.notification.count({
       where: { userId, isRead: false }
     });
     res.json({ notifications, unreadCount });
@@ -75107,7 +75107,7 @@ router9.put("/:id/read", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const id = req.params.id;
-    await prisma2.notification.updateMany({
+    await prisma.notification.updateMany({
       where: { id, userId },
       data: { isRead: true }
     });
@@ -75119,7 +75119,7 @@ router9.put("/:id/read", requireAuth, async (req, res, next) => {
 router9.put("/read-all", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    await prisma2.notification.updateMany({
+    await prisma.notification.updateMany({
       where: { userId, isRead: false },
       data: { isRead: true }
     });
@@ -75130,7 +75130,7 @@ router9.put("/read-all", requireAuth, async (req, res, next) => {
 });
 router9.get("/announcements", async (req, res, next) => {
   try {
-    const announcements = await prisma2.announcement.findMany({
+    const announcements = await prisma.announcement.findMany({
       where: { status: "ACTIVE" },
       orderBy: { createdAt: "desc" },
       take: 10
@@ -75147,7 +75147,7 @@ var import_express10 = __toESM(require_express2(), 1);
 var router10 = (0, import_express10.Router)();
 router10.get("/public", async (req, res, next) => {
   try {
-    const settings = await prisma2.siteSetting.findMany({
+    const settings = await prisma.siteSetting.findMany({
       where: {
         key: {
           in: [
@@ -75216,7 +75216,7 @@ async function requireAdmin(req, res, next) {
     }
     const token = authHeader.split(" ")[1];
     const decoded = import_jsonwebtoken3.default.verify(token, config2.adminSecret);
-    const admin = await prisma2.adminUser.findUnique({
+    const admin = await prisma.adminUser.findUnique({
       where: { id: decoded.adminId },
       select: {
         id: true,
@@ -75242,7 +75242,7 @@ async function requireAdmin(req, res, next) {
 // src/services/auditService.ts
 async function logAdminAction(params) {
   try {
-    return await prisma2.adminAuditLog.create({
+    return await prisma.adminAuditLog.create({
       data: {
         adminId: params.adminId,
         adminUsername: params.adminUsername,
@@ -75269,7 +75269,7 @@ var adminLoginSchema = external_exports.object({
 router11.post("/login", async (req, res, next) => {
   try {
     const { username, password } = adminLoginSchema.parse(req.body);
-    const admin = await prisma2.adminUser.findUnique({
+    const admin = await prisma.adminUser.findUnique({
       where: { username }
     });
     if (!admin || admin.status !== "ACTIVE") {
@@ -75317,11 +75317,11 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
       pendingDeposits,
       pendingWithdrawals
     ] = await Promise.all([
-      prisma2.taskSubmission.count({ where: { status: "PENDING" } }),
-      prisma2.spinHistory.count({ where: { rewardStatus: "PENDING" } }),
-      prisma2.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
-      prisma2.depositRequest.count({ where: { status: "PENDING" } }),
-      prisma2.withdrawalRequest.count({
+      prisma.taskSubmission.count({ where: { status: "PENDING" } }),
+      prisma.spinHistory.count({ where: { rewardStatus: "PENDING" } }),
+      prisma.userSpinEntitlement.count({ where: { requiresAdminReview: true, adminReviewed: false } }),
+      prisma.depositRequest.count({ where: { status: "PENDING" } }),
+      prisma.withdrawalRequest.count({
         where: {
           OR: [
             { approvalStatus: "PENDING" },
@@ -75363,33 +75363,33 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
       recentActivity,
       recentTransactions
     ] = await Promise.all([
-      prisma2.user.count(),
-      prisma2.user.count({ where: { accountStatus: "ACTIVE" } }),
-      prisma2.task.count(),
-      prisma2.taskSubmission.count({ where: { status: "PENDING" } }),
-      prisma2.depositRequest.count({ where: { status: "PENDING" } }),
-      prisma2.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } }),
-      prisma2.depositRequest.aggregate({
+      prisma.user.count(),
+      prisma.user.count({ where: { accountStatus: "ACTIVE" } }),
+      prisma.task.count(),
+      prisma.taskSubmission.count({ where: { status: "PENDING" } }),
+      prisma.depositRequest.count({ where: { status: "PENDING" } }),
+      prisma.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } }),
+      prisma.depositRequest.aggregate({
         where: { status: "APPROVED" },
         _sum: { amount: true }
       }),
-      prisma2.withdrawalRequest.aggregate({
+      prisma.withdrawalRequest.aggregate({
         where: { paymentStatus: "PAID" },
         _sum: { amount: true }
       }),
-      prisma2.walletTransaction.aggregate({
+      prisma.walletTransaction.aggregate({
         where: {
           transactionType: { in: ["TASK_REWARD", "LEVEL_REWARD", "REFERRAL_REWARD", "SPIN_REWARD"] },
           status: "COMPLETED"
         },
         _sum: { amount: true }
       }),
-      prisma2.referral.count(),
-      prisma2.adminAuditLog.findMany({
+      prisma.referral.count(),
+      prisma.adminAuditLog.findMany({
         orderBy: { createdAt: "desc" },
         take: 8
       }),
-      prisma2.walletTransaction.findMany({
+      prisma.walletTransaction.findMany({
         include: { user: { select: { name: true, phone: true } } },
         orderBy: { createdAt: "desc" },
         take: 8
@@ -75417,7 +75417,7 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
 });
 router11.get("/tasks/grid", requireAdmin, async (req, res, next) => {
   try {
-    const levels = await prisma2.level.findMany({
+    const levels = await prisma.level.findMany({
       orderBy: { levelNumber: "asc" },
       include: {
         tasks: {
@@ -75488,7 +75488,7 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
       ];
     }
     const [users, total] = await Promise.all([
-      prisma2.user.findMany({
+      prisma.user.findMany({
         where,
         include: {
           wallet: true,
@@ -75503,7 +75503,7 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
         skip,
         take: limit
       }),
-      prisma2.user.count({ where })
+      prisma.user.count({ where })
     ]);
     const formattedUsers = users.map((u) => ({
       id: u.id,
@@ -75534,7 +75534,7 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
 router11.get("/users/:userId", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.userId;
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
         wallet: true,
@@ -75567,9 +75567,9 @@ router11.put("/users/:userId/status", requireAdmin, async (req, res, next) => {
       status: external_exports.enum(["ACTIVE", "SUSPENDED"]),
       reason: external_exports.string().optional()
     }).parse(req.body);
-    const user = await prisma2.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
-    const updated = await prisma2.user.update({
+    const updated = await prisma.user.update({
       where: { id: userId },
       data: { accountStatus: status },
       select: {
@@ -75612,7 +75612,7 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
     if (Object.keys(fieldsToUpdate).length === 0) {
       return res.status(400).json({ error: "No fields provided to update" });
     }
-    const existingUser = await prisma2.user.findUnique({
+    const existingUser = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true }
     });
@@ -75635,7 +75635,7 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
         user: existingUser
       });
     }
-    const updatedUser = await prisma2.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: updateData,
       select: {
@@ -75670,7 +75670,7 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
 router11.get("/users/:userId/summary", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.userId;
-    const u = await prisma2.user.findUnique({
+    const u = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -75724,10 +75724,10 @@ router11.post("/users/:userId/reset-password", requireAdmin, async (req, res, ne
       requireChangeOnLogin: external_exports.boolean().default(true),
       reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Password Reset")
     }).parse(req.body);
-    const user = await prisma2.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
     const passwordHash = await bcryptjs_default.hash(temporaryPassword, 10);
-    await prisma2.user.update({
+    await prisma.user.update({
       where: { id: userId },
       data: {
         passwordHash,
@@ -75743,7 +75743,7 @@ router11.post("/users/:userId/reset-password", requireAdmin, async (req, res, ne
       reason,
       ipAddress: req.ip
     });
-    await prisma2.notification.create({
+    await prisma.notification.create({
       data: {
         userId: user.id,
         title: "Security Notice: Password Reset by Admin \u{1F510}",
@@ -75765,7 +75765,7 @@ router11.post("/users/:userId/adjust-balance", requireAdmin, async (req, res, ne
       reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Balance Adjustment"),
       notes: external_exports.string().optional()
     }).parse(req.body);
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { wallet: true }
     });
@@ -75778,7 +75778,7 @@ router11.post("/users/:userId/adjust-balance", requireAdmin, async (req, res, ne
     }
     const finalAmount = actionType === "CREDIT" ? amount : -amount;
     const newBalance = currentBalance + finalAmount;
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updatedWallet = await tx.wallet.update({
         where: { userId },
         data: {
@@ -75843,7 +75843,7 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
       reason: external_exports.string().optional().transform((v) => v && v.trim() ? v.trim() : "Admin Credit Points Adjustment"),
       notes: external_exports.string().optional()
     }).parse(req.body);
-    const user = await prisma2.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { wallet: true }
     });
@@ -75856,7 +75856,7 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
     }
     const finalPointsDelta = actionType === "ADD" ? points : -points;
     const newPoints = currentPoints + finalPointsDelta;
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updatedWallet = await tx.wallet.update({
         where: { userId },
         data: {
@@ -75914,7 +75914,7 @@ router11.get("/tasks", requireAdmin, async (req, res, next) => {
         { description: { contains: search } }
       ];
     }
-    const tasks = await prisma2.task.findMany({
+    const tasks = await prisma.task.findMany({
       where,
       include: {
         level: true,
@@ -75953,9 +75953,9 @@ router11.put("/tasks/:taskId", requireAdmin, async (req, res, next) => {
       status: external_exports.enum(["ACTIVE", "DISABLED"])
     });
     const validated = schema.parse(req.body);
-    const existingTask = await prisma2.task.findUnique({ where: { id: taskId } });
+    const existingTask = await prisma.task.findUnique({ where: { id: taskId } });
     if (!existingTask) return res.status(404).json({ error: "Task not found" });
-    const updatedTask = await prisma2.task.update({
+    const updatedTask = await prisma.task.update({
       where: { id: taskId },
       data: {
         ...validated,
@@ -75979,7 +75979,7 @@ router11.put("/tasks/:taskId", requireAdmin, async (req, res, next) => {
 });
 router11.get("/levels", requireAdmin, async (req, res, next) => {
   try {
-    const levels = await prisma2.level.findMany({
+    const levels = await prisma.level.findMany({
       orderBy: { levelNumber: "asc" },
       include: {
         tasks: { orderBy: { taskNumber: "asc" } },
@@ -76001,9 +76001,9 @@ router11.put("/levels/:levelId", requireAdmin, async (req, res, next) => {
       status: external_exports.enum(["ACTIVE", "DISABLED"])
     });
     const validated = schema.parse(req.body);
-    const existing = await prisma2.level.findUnique({ where: { id: levelId } });
+    const existing = await prisma.level.findUnique({ where: { id: levelId } });
     if (!existing) return res.status(404).json({ error: "Level not found" });
-    const updated = await prisma2.level.update({
+    const updated = await prisma.level.update({
       where: { id: levelId },
       data: validated
     });
@@ -76033,7 +76033,7 @@ router11.get("/submissions", requireAdmin, async (req, res, next) => {
     if (status) where.status = status;
     if (levelNumber) where.task = { level: { levelNumber } };
     const [submissions, total] = await Promise.all([
-      prisma2.taskSubmission.findMany({
+      prisma.taskSubmission.findMany({
         where,
         include: {
           user: { select: { id: true, name: true, phone: true } },
@@ -76043,7 +76043,7 @@ router11.get("/submissions", requireAdmin, async (req, res, next) => {
         skip,
         take: limit
       }),
-      prisma2.taskSubmission.count({ where })
+      prisma.taskSubmission.count({ where })
     ]);
     res.json({
       submissions,
@@ -76060,7 +76060,7 @@ router11.get("/submissions", requireAdmin, async (req, res, next) => {
 });
 async function executeReviewSubmissionCore(params) {
   const { submissionId, action, admin, reviewNotes, rejectionReason, ipAddress } = params;
-  const submission = await prisma2.taskSubmission.findUnique({
+  const submission = await prisma.taskSubmission.findUnique({
     where: { id: submissionId },
     include: {
       task: { include: { level: true } },
@@ -76078,7 +76078,7 @@ async function executeReviewSubmissionCore(params) {
     );
     const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
     const taskRewardToAdd = Number(task.rewardAmount || 0);
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updatedSub2 = await tx.taskSubmission.update({
         where: { id: submissionId },
         data: {
@@ -76233,7 +76233,7 @@ async function executeReviewSubmissionCore(params) {
     sendUserLiveCommand(user.id, "refresh", { type: "TASK_APPROVED" });
     return { updatedSub, updatedWallet };
   } else {
-    const updatedSub = await prisma2.$transaction(async (tx) => {
+    const updatedSub = await prisma.$transaction(async (tx) => {
       const sub = await tx.taskSubmission.update({
         where: { id: submissionId },
         data: {
@@ -76355,14 +76355,14 @@ router11.get("/deposits", requireAdmin, async (req, res, next) => {
     const where = {};
     if (status) where.status = status;
     const [deposits, total] = await Promise.all([
-      prisma2.depositRequest.findMany({
+      prisma.depositRequest.findMany({
         where,
         include: { user: { select: { id: true, name: true, phone: true } } },
         orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
-      prisma2.depositRequest.count({ where })
+      prisma.depositRequest.count({ where })
     ]);
     res.json({
       deposits,
@@ -76384,7 +76384,7 @@ router11.put("/deposits/:depositId/review", requireAdmin, async (req, res, next)
       action: external_exports.enum(["APPROVE", "REJECT"]),
       reviewNotes: external_exports.string().optional()
     }).parse(req.body);
-    const deposit = await prisma2.depositRequest.findUnique({
+    const deposit = await prisma.depositRequest.findUnique({
       where: { id: depositId },
       include: { user: true }
     });
@@ -76393,7 +76393,7 @@ router11.put("/deposits/:depositId/review", requireAdmin, async (req, res, next)
       return res.status(400).json({ error: `This deposit has already been reviewed (Status: ${deposit.status})` });
     }
     if (action === "APPROVE") {
-      const result = await prisma2.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         const updatedDep = await tx.depositRequest.update({
           where: { id: depositId },
           data: {
@@ -76452,7 +76452,7 @@ router11.put("/deposits/:depositId/review", requireAdmin, async (req, res, next)
       });
       res.json({ message: `Deposit of PKR ${deposit.amount.toLocaleString()} approved and credited!`, deposit: result });
     } else {
-      const updatedDep = await prisma2.$transaction(async (tx) => {
+      const updatedDep = await prisma.$transaction(async (tx) => {
         const dep = await tx.depositRequest.update({
           where: { id: depositId },
           data: {
@@ -76503,14 +76503,14 @@ router11.get("/withdrawals", requireAdmin, async (req, res, next) => {
     if (approvalStatus) where.approvalStatus = approvalStatus;
     if (paymentStatus) where.paymentStatus = paymentStatus;
     const [withdrawals, total] = await Promise.all([
-      prisma2.withdrawalRequest.findMany({
+      prisma.withdrawalRequest.findMany({
         where,
         include: { user: { select: { id: true, name: true, phone: true } } },
         orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
-      prisma2.withdrawalRequest.count({ where })
+      prisma.withdrawalRequest.count({ where })
     ]);
     res.json({
       withdrawals,
@@ -76532,7 +76532,7 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
       action: external_exports.enum(["APPROVE", "REJECT"]),
       reviewNotes: external_exports.string().optional()
     }).parse(req.body);
-    const withdrawal = await prisma2.withdrawalRequest.findUnique({
+    const withdrawal = await prisma.withdrawalRequest.findUnique({
       where: { id: withdrawalId },
       include: { user: true }
     });
@@ -76541,7 +76541,7 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
       return res.status(400).json({ error: `Withdrawal has already been reviewed (Status: ${withdrawal.approvalStatus})` });
     }
     if (action === "APPROVE") {
-      const updated = await prisma2.withdrawalRequest.update({
+      const updated = await prisma.withdrawalRequest.update({
         where: { id: withdrawalId },
         data: {
           approvalStatus: "APPROVED",
@@ -76551,7 +76551,7 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
           reviewNotes: reviewNotes || null
         }
       });
-      await prisma2.notification.create({
+      await prisma.notification.create({
         data: {
           userId: withdrawal.userId,
           title: `Withdrawal Approved! \u2705`,
@@ -76571,7 +76571,7 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
       });
       res.json({ message: "Withdrawal approved. Status is now Approved (Not Sent).", withdrawal: updated });
     } else {
-      const updated = await prisma2.$transaction(async (tx) => {
+      const updated = await prisma.$transaction(async (tx) => {
         const reqRec = await tx.withdrawalRequest.update({
           where: { id: withdrawalId },
           data: {
@@ -76636,7 +76636,7 @@ router11.put("/withdrawals/:withdrawalId/payout", requireAdmin, async (req, res,
       payoutReference: external_exports.string().min(2, "Payout transaction reference / Trx ID is required"),
       reviewNotes: external_exports.string().optional()
     }).parse(req.body);
-    const withdrawal = await prisma2.withdrawalRequest.findUnique({
+    const withdrawal = await prisma.withdrawalRequest.findUnique({
       where: { id: withdrawalId },
       include: { user: true }
     });
@@ -76647,7 +76647,7 @@ router11.put("/withdrawals/:withdrawalId/payout", requireAdmin, async (req, res,
     if (withdrawal.paymentStatus === "PAID") {
       return res.status(400).json({ error: "This withdrawal has already been marked as Paid" });
     }
-    const result = await prisma2.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updatedReq = await tx.withdrawalRequest.update({
         where: { id: withdrawalId },
         data: {
@@ -76706,7 +76706,7 @@ router11.get("/spin", requireAdmin, async (req, res, next) => {
   try {
     const [prizes, entitlements, pendingMilestones, history] = await Promise.all([
       ensureOfficialSpinPrizes(),
-      prisma2.userSpinEntitlement.findMany({
+      prisma.userSpinEntitlement.findMany({
         include: {
           user: { select: { id: true, name: true, phone: true } },
           assignedPrize: true
@@ -76714,7 +76714,7 @@ router11.get("/spin", requireAdmin, async (req, res, next) => {
         orderBy: { createdAt: "desc" },
         take: 30
       }),
-      prisma2.userSpinEntitlement.findMany({
+      prisma.userSpinEntitlement.findMany({
         where: {
           requiresAdminReview: true,
           adminReviewed: false,
@@ -76726,7 +76726,7 @@ router11.get("/spin", requireAdmin, async (req, res, next) => {
         },
         orderBy: { createdAt: "desc" }
       }),
-      prisma2.spinHistory.findMany({
+      prisma.spinHistory.findMany({
         include: {
           user: { select: { id: true, name: true, phone: true } },
           prize: true
@@ -76735,7 +76735,7 @@ router11.get("/spin", requireAdmin, async (req, res, next) => {
         take: 30
       })
     ]);
-    const spinSetting = await prisma2.siteSetting.findUnique({ where: { key: "spin_enabled" } });
+    const spinSetting = await prisma.siteSetting.findUnique({ where: { key: "spin_enabled" } });
     res.json({
       isSpinEnabled: spinSetting?.value === "true",
       prizes,
@@ -76755,13 +76755,13 @@ router11.post("/spin/assign", requireAdmin, async (req, res, next) => {
       totalSpins: external_exports.number().int().positive("Total spins must be at least 1"),
       isEligible: external_exports.boolean().default(true)
     }).parse(req.body);
-    const user = await prisma2.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: "User not found" });
     let prize = null;
     if (assignedPrizeId) {
-      prize = await prisma2.spinPrize.findUnique({ where: { id: assignedPrizeId } });
+      prize = await prisma.spinPrize.findUnique({ where: { id: assignedPrizeId } });
     }
-    const entitlement = await prisma2.userSpinEntitlement.create({
+    const entitlement = await prisma.userSpinEntitlement.create({
       data: {
         userId,
         assignedPrizeId: prize?.id || null,
@@ -76770,7 +76770,7 @@ router11.post("/spin/assign", requireAdmin, async (req, res, next) => {
         isEligible
       }
     });
-    await prisma2.notification.create({
+    await prisma.notification.create({
       data: {
         userId,
         title: `Royal Spin Entitlement Granted! \u{1F3A1}`,
@@ -76799,9 +76799,9 @@ router11.put("/spin/entitlements/:entitlementId/assign", requireAdmin, async (re
     const { assignedPrizeId } = external_exports.object({
       assignedPrizeId: external_exports.string().min(1, "Assigned prize is required")
     }).parse(req.body);
-    const prize = await prisma2.spinPrize.findUnique({ where: { id: assignedPrizeId } });
+    const prize = await prisma.spinPrize.findUnique({ where: { id: assignedPrizeId } });
     if (!prize) return res.status(404).json({ error: "Selected prize not found" });
-    const entitlement = await prisma2.userSpinEntitlement.update({
+    const entitlement = await prisma.userSpinEntitlement.update({
       where: { id: entitlementId },
       data: {
         assignedPrizeId,
@@ -76810,7 +76810,7 @@ router11.put("/spin/entitlements/:entitlementId/assign", requireAdmin, async (re
       },
       include: { user: true, assignedPrize: true }
     });
-    await prisma2.notification.create({
+    await prisma.notification.create({
       data: {
         userId: entitlement.userId,
         title: `Royal Spin Unlocked! \u{1F3A1}`,
@@ -76846,7 +76846,7 @@ router11.post("/spin/prizes", requireAdmin, async (req, res, next) => {
       status: external_exports.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
     });
     const validated = schema.parse(req.body);
-    const prize = await prisma2.spinPrize.create({ data: validated });
+    const prize = await prisma.spinPrize.create({ data: validated });
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -76863,12 +76863,12 @@ router11.post("/spin/prizes", requireAdmin, async (req, res, next) => {
 });
 router11.get("/referrals", requireAdmin, async (req, res, next) => {
   try {
-    const referrals = await prisma2.referral.findMany({
+    const referrals = await prisma.referral.findMany({
       orderBy: { createdAt: "desc" },
       take: 50
     });
     const userIds = Array.from(/* @__PURE__ */ new Set([...referrals.map((r) => r.referrerId), ...referrals.map((r) => r.referredId)]));
-    const users = await prisma2.user.findMany({
+    const users = await prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, phone: true, referralCode: true }
     });
@@ -76896,14 +76896,14 @@ router11.get("/transactions", requireAdmin, async (req, res, next) => {
     const where = {};
     if (transactionType) where.transactionType = transactionType;
     const [transactions, total] = await Promise.all([
-      prisma2.walletTransaction.findMany({
+      prisma.walletTransaction.findMany({
         where,
         include: { user: { select: { id: true, name: true, phone: true } } },
         orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
-      prisma2.walletTransaction.count({ where })
+      prisma.walletTransaction.count({ where })
     ]);
     res.json({
       transactions,
@@ -76920,7 +76920,7 @@ router11.get("/transactions", requireAdmin, async (req, res, next) => {
 });
 router11.get("/announcements", requireAdmin, async (req, res, next) => {
   try {
-    const announcements = await prisma2.announcement.findMany({
+    const announcements = await prisma.announcement.findMany({
       orderBy: { createdAt: "desc" }
     });
     res.json({ announcements });
@@ -76937,7 +76937,7 @@ router11.post("/announcements", requireAdmin, async (req, res, next) => {
       status: external_exports.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE")
     });
     const validated = schema.parse(req.body);
-    const announcement = await prisma2.announcement.create({ data: validated });
+    const announcement = await prisma.announcement.create({ data: validated });
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -76955,7 +76955,7 @@ router11.post("/announcements", requireAdmin, async (req, res, next) => {
 router11.delete("/announcements/:id", requireAdmin, async (req, res, next) => {
   try {
     const id = req.params.id;
-    await prisma2.announcement.delete({ where: { id } });
+    await prisma.announcement.delete({ where: { id } });
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -76971,7 +76971,7 @@ router11.delete("/announcements/:id", requireAdmin, async (req, res, next) => {
 });
 router11.get("/settings", requireAdmin, async (req, res, next) => {
   try {
-    const settings = await prisma2.siteSetting.findMany({
+    const settings = await prisma.siteSetting.findMany({
       orderBy: { category: "asc" }
     });
     res.json({ settings });
@@ -76997,7 +76997,7 @@ router11.put("/settings", requireAdmin, async (req, res, next) => {
       value: item.value === null || item.value === void 0 ? "" : String(item.value)
     }));
     for (const item of settings) {
-      await prisma2.siteSetting.upsert({
+      await prisma.siteSetting.upsert({
         where: { key: item.key },
         update: { value: item.value },
         create: { key: item.key, value: item.value }
@@ -77030,14 +77030,14 @@ router11.get("/reports", requireAdmin, async (req, res, next) => {
       totalReferralRewards,
       totalSpinRewards
     ] = await Promise.all([
-      prisma2.user.count(),
-      prisma2.depositRequest.aggregate({ where: { status: "APPROVED" }, _sum: { amount: true } }),
-      prisma2.withdrawalRequest.aggregate({ where: { paymentStatus: "PAID" }, _sum: { amount: true } }),
-      prisma2.withdrawalRequest.aggregate({ where: { approvalStatus: "PENDING" }, _sum: { amount: true } }),
-      prisma2.walletTransaction.aggregate({ where: { transactionType: "TASK_REWARD", status: "COMPLETED" }, _sum: { amount: true } }),
-      prisma2.walletTransaction.aggregate({ where: { transactionType: "TASK_UNLOCK_FEE", status: "COMPLETED" }, _sum: { amount: true } }),
-      prisma2.walletTransaction.aggregate({ where: { transactionType: "REFERRAL_REWARD", status: "COMPLETED" }, _sum: { amount: true } }),
-      prisma2.walletTransaction.aggregate({ where: { transactionType: "SPIN_REWARD", status: "COMPLETED" }, _sum: { amount: true } })
+      prisma.user.count(),
+      prisma.depositRequest.aggregate({ where: { status: "APPROVED" }, _sum: { amount: true } }),
+      prisma.withdrawalRequest.aggregate({ where: { paymentStatus: "PAID" }, _sum: { amount: true } }),
+      prisma.withdrawalRequest.aggregate({ where: { approvalStatus: "PENDING" }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { transactionType: "TASK_REWARD", status: "COMPLETED" }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { transactionType: "TASK_UNLOCK_FEE", status: "COMPLETED" }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { transactionType: "REFERRAL_REWARD", status: "COMPLETED" }, _sum: { amount: true } }),
+      prisma.walletTransaction.aggregate({ where: { transactionType: "SPIN_REWARD", status: "COMPLETED" }, _sum: { amount: true } })
     ]);
     res.json({
       summary: {
@@ -77062,12 +77062,12 @@ router11.get("/activity-logs", requireAdmin, async (req, res, next) => {
     const limit = parseInt(req.query.limit || "30", 10);
     const skip = (page - 1) * limit;
     const [logs, total] = await Promise.all([
-      prisma2.adminAuditLog.findMany({
+      prisma.adminAuditLog.findMany({
         orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
-      prisma2.adminAuditLog.count()
+      prisma.adminAuditLog.count()
     ]);
     res.json({
       logs,

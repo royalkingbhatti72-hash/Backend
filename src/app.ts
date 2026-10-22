@@ -20,6 +20,7 @@ import settingsRoutes from './routes/settingsRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
+import { prisma } from './prisma';
 import { getAdminSpaHtml } from './views/adminHtml';
 
 export function createApp() {
