@@ -54,16 +54,16 @@ async function main() {
   });
   console.log(`✅ Seeded Admin User: ${admin.username} (Password: Admin@Royal2026!)`);
 
-  // 3. Spin Prizes
+  // 3. Spin Prizes (8 Official Prizes)
   const spinPrizesData = [
     { name: 'PKR 50', prizeType: 'CASH', monetaryValue: 50, displayLabel: 'PKR 50', color: '#1459E8', icon: 'Coins' },
     { name: 'PKR 100', prizeType: 'CASH', monetaryValue: 100, displayLabel: 'PKR 100', color: '#792BFF', icon: 'Gift' },
-    { name: 'PKR 250', prizeType: 'CASH', monetaryValue: 250, displayLabel: 'PKR 250', color: '#22D3EE', icon: 'Zap' },
-    { name: 'PKR 500', prizeType: 'CASH', monetaryValue: 500, displayLabel: 'PKR 500', color: '#FFD45A', icon: 'Crown' },
-    { name: 'PKR 1,000', prizeType: 'CASH', monetaryValue: 1000, displayLabel: 'PKR 1,000', color: '#22C55E', icon: 'Sparkles' },
-    { name: 'PKR 5,000', prizeType: 'CASH', monetaryValue: 5000, displayLabel: 'PKR 5,000 Mega', color: '#EF4444', icon: 'Trophy' },
-    { name: 'Royal Gold Watch', prizeType: 'PHYSICAL', monetaryValue: 15000, displayLabel: 'Gold Watch', color: '#F59E0B', icon: 'Watch' },
-    { name: 'Smartphone Pro', prizeType: 'PHYSICAL', monetaryValue: 75000, displayLabel: 'Smartphone Pro', color: '#6366F1', icon: 'Smartphone' },
+    { name: 'Suzuki Alto Car', prizeType: 'PHYSICAL', monetaryValue: 2500000, displayLabel: 'Alto Car', color: '#059669', icon: 'Car' },
+    { name: 'PKR 500', prizeType: 'CASH', monetaryValue: 500, displayLabel: 'PKR 500', color: '#DC2626', icon: 'Crown' },
+    { name: 'PKR 1,000', prizeType: 'CASH', monetaryValue: 1000, displayLabel: 'PKR 1,000', color: '#0284C7', icon: 'Sparkles' },
+    { name: 'PKR 5,000', prizeType: 'CASH', monetaryValue: 5000, displayLabel: 'PKR 5,000 Mega', color: '#D97706', icon: 'Trophy' },
+    { name: 'Expensive Watch', prizeType: 'PHYSICAL', monetaryValue: 45000, displayLabel: 'Expensive Watch', color: '#4F46E5', icon: 'Watch' },
+    { name: 'iPhone 15 Pro', prizeType: 'PHYSICAL', monetaryValue: 350000, displayLabel: 'iPhone 15 Pro', color: '#EAB308', icon: 'Smartphone' },
   ];
 
   await prisma.spinPrize.deleteMany({});
@@ -73,6 +73,11 @@ async function main() {
     createdPrizes.push(created);
   }
   console.log(`✅ Seeded ${createdPrizes.length} Spin Prizes`);
+
+  // 3.5. Ensure 100 Official Admin Referral Codes
+  const { ensureAdminReferralCodes } = await import('../src/services/adminReferralService');
+  await ensureAdminReferralCodes();
+  console.log('✅ Ensured 100 official Admin Referral Codes');
 
   // 4. Exactly 10 Levels & 135 Tasks (from official 10-tier dataset)
   const levels = [];

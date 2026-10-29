@@ -6,6 +6,7 @@ import { prisma } from '../prisma';
 import { config } from '../config';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { affiliateService } from '../services/affiliateService';
+import { validateAdminReferralCode, claimAdminReferralCode } from '../services/adminReferralService';
 
 const router = Router();
 
@@ -39,6 +40,16 @@ function normalizePhone(phone: string): string {
 }
 
 /**
+ * GET /api/auth/validate-referral/:code
+ * Public endpoint to check if an exclusive admin referral code is available
+ */
+router.get('/validate-referral/:code', async (req: Request, res: Response) => {
+  const code = (req.params.code as string || '').trim().toUpperCase();
+  const isValid = await validateAdminReferralCode(code);
+  res.json({ valid: isValid, code });
+});
+
+/**
  * POST /api/auth/register
  */
 router.post('/register', async (req: Request, res: Response, next) => {
@@ -46,17 +57,19 @@ router.post('/register', async (req: Request, res: Response, next) => {
     const validated = registerSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
 
-    // Enforce referral code requirement
+    // Enforce official admin referral code requirement
     const trimmedRefCode = (validated.referralCode || '').trim().toUpperCase();
     if (!trimmedRefCode) {
-      return res.status(400).json({ error: 'A valid referral code is required to register. Registration is invite-only.' });
+      return res.status(400).json({
+        error: 'A valid referral code is required to register. Registration is invite-only.',
+      });
     }
 
-    const referrer = await prisma.user.findUnique({
-      where: { referralCode: trimmedRefCode },
-    });
-    if (!referrer) {
-      return res.status(400).json({ error: 'Invalid referral code provided. You must enter a valid inviter code to register.' });
+    const isValidAdminCode = await validateAdminReferralCode(trimmedRefCode);
+    if (!isValidAdminCode) {
+      return res.status(400).json({
+        error: 'Invalid or already used referral code. Registration requires an exclusive invitation code provided by administration.',
+      });
     }
 
     // Check unique phone
@@ -79,7 +92,7 @@ router.post('/register', async (req: Request, res: Response, next) => {
 
     const passwordHash = await bcrypt.hash(validated.password, 10);
 
-    // Transaction to create user, wallet, level 1 progress, referral record
+    // Transaction to create user, wallet, level 1 progress, and claim admin referral code
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -87,10 +100,22 @@ router.post('/register', async (req: Request, res: Response, next) => {
           phone: normalizedPhone,
           passwordHash,
           referralCode: userReferralCode,
-          referredById: referrer?.id || null,
+          referredById: null,
           accountStatus: 'ACTIVE',
         },
       });
+
+      // Claim the admin referral code immediately
+      await tx.$executeRawUnsafe(`
+        UPDATE "AdminReferralCode"
+        SET "status" = 'USED',
+            "usedById" = $1,
+            "usedByName" = $2,
+            "usedByPhone" = $3,
+            "usedAt" = CURRENT_TIMESTAMP,
+            "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "code" = $4 AND "status" = 'AVAILABLE'
+      `, user.id, user.name, normalizedPhone, trimmedRefCode);
 
       // Create wallet
       await tx.wallet.create({
@@ -119,10 +144,6 @@ router.post('/register', async (req: Request, res: Response, next) => {
 
       return user;
     });
-
-    if (referrer) {
-      await affiliateService.handleNewRegistration(referrer.id, result.id);
-    }
 
     const token = jwt.sign({ userId: result.id }, config.jwtSecret, { expiresIn: '7d' });
 

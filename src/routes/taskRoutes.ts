@@ -6,6 +6,7 @@ import { taskProgressionService } from '../services/taskProgressionService';
 import { ledgerService, InsufficientBalanceError } from '../services/ledgerService';
 import { affiliateService } from '../services/affiliateService';
 import { sendUserLiveCommand } from '../utils/supabase';
+import { syncDatasetTasksToDatabase } from '../services/taskDatasetService';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ const router = Router();
 router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
     const userId = req.user!.id;
+    await syncDatasetTasksToDatabase();
     const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
       prisma.userTaskProgress.findMany({

@@ -10,6 +10,11 @@ import { taskProgressionService } from '../services/taskProgressionService';
 import { affiliateService } from '../services/affiliateService';
 import { sendUserLiveCommand } from '../utils/supabase';
 import { ensureOfficialSpinPrizes } from '../services/spinPrizeService';
+import {
+  getAdminReferralCodesOverview,
+  generateAdditionalCodes,
+  ensureAdminReferralCodes,
+} from '../services/adminReferralService';
 
 const router = Router();
 
@@ -2167,6 +2172,76 @@ router.get('/activity-logs', requireAdmin, async (req: AdminAuthRequest, res: Re
         totalPages: Math.ceil(total / limit),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 17. OFFICIAL ADMIN REFERRAL CODES MANAGEMENT
+// ==========================================
+
+router.get('/referral-codes', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const data = await getAdminReferralCodesOverview();
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { count = 10, prefix = 'ROYAL-VIP' } = req.body;
+    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100), prefix);
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'GENERATED_ADMIN_REFERRAL_CODES',
+      entityType: 'AdminReferralCode',
+      entityId: `batch_${Date.now()}`,
+      newState: { count: generated.length, generated },
+      reason: `Generated ${generated.length} official invitation referral codes`,
+      ipAddress: req.ip,
+    });
+
+    const data = await getAdminReferralCodesOverview();
+    res.json({ message: `Successfully generated ${generated.length} new referral codes!`, ...data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { code, notes } = z.object({
+      code: z.string().min(3).max(30),
+      notes: z.string().optional(),
+    }).parse(req.body);
+
+    const formattedCode = code.trim().toUpperCase();
+    await ensureAdminReferralCodes();
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+      VALUES ($1, $2, 'AVAILABLE', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT ("code") DO NOTHING;
+    `, `arc_custom_${Date.now()}`, formattedCode, notes || 'Custom Admin Code');
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'CREATED_CUSTOM_REFERRAL_CODE',
+      entityType: 'AdminReferralCode',
+      entityId: formattedCode,
+      newState: { code: formattedCode },
+      reason: notes || 'Admin added custom invitation code',
+      ipAddress: req.ip,
+    });
+
+    const data = await getAdminReferralCodesOverview();
+    res.json({ message: `Code "${formattedCode}" created successfully!`, ...data });
   } catch (err) {
     next(err);
   }

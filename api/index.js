@@ -64863,232 +64863,114 @@ async function requireAuth(req, res, next) {
   }
 }
 
-// src/services/affiliateService.ts
-var affiliateService = {
-  /**
-   * Fetches current affiliate and referral program settings from database
-   */
-  async getSettings() {
-    const keys = [
-      "referral_reward",
-      "referral_qualifying_condition",
-      "affiliate_program_enabled",
-      "affiliate_bronze_target",
-      "affiliate_silver_target",
-      "affiliate_gold_target",
-      "affiliate_share_template",
-      "affiliate_auto_payout",
-      "affiliate_anti_fraud"
-    ];
-    const settings = await prisma.siteSetting.findMany({
-      where: { key: { in: keys } }
-    });
-    const map2 = Object.fromEntries(settings.map((s) => [s.key, s.value]));
-    return {
-      referralReward: parseFloat(map2.referral_reward || "250"),
-      qualifyingCondition: map2.referral_qualifying_condition || "FIRST_TASK_APPROVED",
-      affiliateProgramEnabled: map2.affiliate_program_enabled !== "false",
-      bronzeTarget: parseInt(map2.affiliate_bronze_target || "5", 10),
-      silverTarget: parseInt(map2.affiliate_silver_target || "15", 10),
-      goldTarget: parseInt(map2.affiliate_gold_target || "30", 10),
-      shareTemplate: map2.affiliate_share_template || "\u{1F451} Join Earn Street with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}",
-      autoPayout: map2.affiliate_auto_payout !== "false",
-      antiFraudEnabled: map2.affiliate_anti_fraud !== "false"
-    };
-  },
-  /**
-   * Called when a user registers with a referrer code
-   */
-  async handleNewRegistration(referrerId, refereeId) {
-    const settings = await this.getSettings();
-    if (!settings.affiliateProgramEnabled) return;
-    if (referrerId === refereeId) return;
-    const isInstant = settings.qualifyingCondition === "INSTANT_ON_REGISTRATION";
-    if (isInstant) {
-      await prisma.$transaction(async (tx) => {
-        await tx.referral.upsert({
-          where: { referrerId_referredId: { referrerId, referredId: refereeId } },
-          update: {
-            qualifyingStatus: "QUALIFIED",
-            rewardStatus: "CREDITED",
-            rewardAmount: 0
-          },
-          create: {
-            referrerId,
-            referredId: refereeId,
-            qualifyingStatus: "QUALIFIED",
-            rewardStatus: "CREDITED",
-            rewardAmount: 0
-          }
-        });
-        await tx.userSpinEntitlement.create({
-          data: {
-            userId: referrerId,
-            triggerReason: `Qualified Referral Reward (New Partner ${refereeId})`,
-            totalSpins: 1,
-            remainingSpins: 1,
-            isEligible: true,
-            requiresAdminReview: false,
-            adminReviewed: true
-          }
-        });
-        await tx.notification.create({
-          data: {
-            userId: referrerId,
-            title: `Qualified Referral: 1 Free Spin Unlocked! \u{1F3B0}`,
-            message: `A new partner registered with your code and qualified! You earned 1 Free Royal Spin.`,
-            notificationType: "SPIN_REWARD"
-          }
-        });
-      });
-      await this.checkAmbassadorMilestones(referrerId);
-    } else {
-      await prisma.referral.upsert({
-        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
-        update: {
-          qualifyingStatus: "PENDING",
-          rewardStatus: "PENDING",
-          rewardAmount: 0
-        },
-        create: {
-          referrerId,
-          referredId: refereeId,
-          qualifyingStatus: "PENDING",
-          rewardStatus: "PENDING",
-          rewardAmount: 0
-        }
-      });
-    }
-  },
-  /**
-   * Evaluates qualification criteria when events occur:
-   * 'TASK_APPROVED' | 'LEVEL_1_COMPLETED' | 'DEPOSIT_APPROVED'
-   */
-  async checkAndQualifyReferral(refereeUserId, triggerType) {
-    const settings = await this.getSettings();
-    if (!settings.affiliateProgramEnabled) return;
-    const referral = await prisma.referral.findFirst({
-      where: {
-        referredId: refereeUserId,
-        qualifyingStatus: "PENDING"
-      }
-    });
-    if (!referral) return;
-    let shouldQualify = false;
-    if (settings.qualifyingCondition === "FIRST_TASK_APPROVED" && triggerType === "TASK_APPROVED") {
-      shouldQualify = true;
-    } else if (settings.qualifyingCondition === "LEVEL_1_COMPLETED" && triggerType === "LEVEL_1_COMPLETED") {
-      shouldQualify = true;
-    } else if (settings.qualifyingCondition === "FIRST_DEPOSIT_COMPLETED" && triggerType === "DEPOSIT_APPROVED") {
-      shouldQualify = true;
-    }
-    if (!shouldQualify) return;
-    const referrerId = referral.referrerId;
-    await prisma.$transaction(async (tx) => {
-      await tx.referral.update({
-        where: { id: referral.id },
-        data: {
-          qualifyingStatus: "QUALIFIED",
-          rewardStatus: "CREDITED",
-          rewardAmount: 0
-        }
-      });
-      await tx.userSpinEntitlement.create({
-        data: {
-          userId: referrerId,
-          triggerReason: `Qualified Referral Reward (Partner ${referral.referredId})`,
-          totalSpins: 1,
-          remainingSpins: 1,
-          isEligible: true,
-          requiresAdminReview: false,
-          adminReviewed: true
-        }
-      });
-      await tx.notification.create({
-        data: {
-          userId: referrerId,
-          title: `Partner Qualified: 1 Free Spin Earned! \u{1F3B0}`,
-          message: `Your referred partner has qualified! You have earned 1 Free Spin on the Lucky Wheel. Head over to the Spin page to play!`,
-          notificationType: "SPIN_REWARD"
-        }
-      });
-    });
-    await this.checkAmbassadorMilestones(referrerId);
-  },
-  /**
-   * Checks Ambassador tier thresholds (Silver, Gold) and awards milestone perks
-   */
-  async checkAmbassadorMilestones(referrerId) {
-    const settings = await this.getSettings();
-    const qualifiedCount = await prisma.referral.count({
-      where: {
-        referrerId,
-        qualifyingStatus: "QUALIFIED"
-      }
-    });
-    if (qualifiedCount >= settings.silverTarget) {
-      const entitlementReason = `Silver Ambassador Milestone (${settings.silverTarget} Qualified Partners)`;
-      const existingSpin = await prisma.userSpinEntitlement.findFirst({
-        where: {
-          userId: referrerId,
-          triggerReason: entitlementReason
-        }
-      });
-      if (!existingSpin) {
-        await prisma.userSpinEntitlement.create({
-          data: {
-            userId: referrerId,
-            triggerReason: entitlementReason,
-            totalSpins: 1,
-            remainingSpins: 1,
-            isEligible: false,
-            // Goes to admin for prize assignment
-            requiresAdminReview: true,
-            adminReviewed: false
-          }
-        });
-        await prisma.notification.create({
-          data: {
-            userId: referrerId,
-            title: `Silver Ambassador Rank Achieved! \u{1F948}`,
-            message: `Congratulations! You have reached ${settings.silverTarget} qualified partners and unlocked Silver Ambassador status plus a Free Royal Milestone Spin!`,
-            notificationType: "SPIN_REWARD"
-          }
-        });
+// src/services/adminReferralService.ts
+var tableEnsured = false;
+async function ensureAdminReferralCodes() {
+  if (tableEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "AdminReferralCode" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "code" TEXT NOT NULL UNIQUE,
+        "status" TEXT NOT NULL DEFAULT 'AVAILABLE',
+        "usedById" TEXT,
+        "usedByName" TEXT,
+        "usedByPhone" TEXT,
+        "usedAt" TIMESTAMP(3),
+        "notes" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "AdminReferralCode_status_idx" ON "AdminReferralCode"("status");
+      CREATE INDEX IF NOT EXISTS "AdminReferralCode_code_idx" ON "AdminReferralCode"("code");
+    `);
+    const result = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::int as count FROM "AdminReferralCode"
+    `);
+    const count = Number(result[0]?.count || 0);
+    if (count < 100) {
+      for (let i = 1; i <= 100; i++) {
+        const codeNum = String(i).padStart(3, "0");
+        const code = `ROYAL-VIP-${codeNum}`;
+        const id = `arc_vip_${codeNum}`;
+        await prisma.$executeRawUnsafe(`
+          INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+          VALUES ($1, $2, 'AVAILABLE', 'Initial Official Admin Invitation Pool', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT ("code") DO NOTHING;
+        `, id, code);
       }
     }
-    if (qualifiedCount >= settings.goldTarget) {
-      const goldSpinReason = `Gold Ambassador Milestone (${settings.goldTarget} Qualified Partners)`;
-      const existingSpin = await prisma.userSpinEntitlement.findFirst({
-        where: {
-          userId: referrerId,
-          triggerReason: goldSpinReason
-        }
-      });
-      if (!existingSpin) {
-        await prisma.userSpinEntitlement.create({
-          data: {
-            userId: referrerId,
-            triggerReason: goldSpinReason,
-            totalSpins: 3,
-            remainingSpins: 3,
-            isEligible: true,
-            requiresAdminReview: false,
-            adminReviewed: true
-          }
-        });
-        await prisma.notification.create({
-          data: {
-            userId: referrerId,
-            title: `Gold Ambassador Crowned! +3 Free Spins Awarded \u{1F451}`,
-            message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and 3 Free Royal Spins!`,
-            notificationType: "SPIN_REWARD"
-          }
-        });
-      }
-    }
+    tableEnsured = true;
+  } catch (err) {
+    console.error("Error ensuring AdminReferralCode table:", err);
   }
-};
+}
+async function getAdminReferralCodesOverview() {
+  await ensureAdminReferralCodes();
+  const [availableCodes, usedCodes] = await Promise.all([
+    prisma.$queryRawUnsafe(`
+      SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
+      FROM "AdminReferralCode"
+      WHERE "status" = 'AVAILABLE'
+      ORDER BY "code" ASC
+    `),
+    prisma.$queryRawUnsafe(`
+      SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
+      FROM "AdminReferralCode"
+      WHERE "status" = 'USED'
+      ORDER BY "usedAt" DESC NULLS LAST, "updatedAt" DESC
+    `)
+  ]);
+  return {
+    availableCodes,
+    usedCodes,
+    stats: {
+      total: availableCodes.length + usedCodes.length,
+      available: availableCodes.length,
+      used: usedCodes.length
+    }
+  };
+}
+async function validateAdminReferralCode(rawCode) {
+  await ensureAdminReferralCodes();
+  const code = (rawCode || "").trim().toUpperCase();
+  if (!code) return false;
+  const result = await prisma.$queryRawUnsafe(`
+    SELECT "id" FROM "AdminReferralCode"
+    WHERE "code" = $1 AND "status" = 'AVAILABLE'
+    LIMIT 1
+  `, code);
+  return result.length > 0;
+}
+async function generateAdditionalCodes(count = 10, prefix = "ROYAL-VIP") {
+  await ensureAdminReferralCodes();
+  const generated = [];
+  const maxResult = await prisma.$queryRawUnsafe(`
+    SELECT "code" FROM "AdminReferralCode"
+    WHERE "code" LIKE $1
+    ORDER BY "code" DESC
+    LIMIT 1
+  `, `${prefix}-%`);
+  let nextIndex = 101;
+  if (maxResult.length > 0) {
+    const lastNum = parseInt(maxResult[0].code.replace(`${prefix}-`, ""), 10);
+    if (!isNaN(lastNum)) nextIndex = lastNum + 1;
+  }
+  for (let i = 0; i < count; i++) {
+    const codeNum = String(nextIndex + i).padStart(3, "0");
+    const code = `${prefix}-${codeNum}`;
+    const id = `arc_gen_${Date.now()}_${i}`;
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+      VALUES ($1, $2, 'AVAILABLE', 'Admin Generated Batch', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT ("code") DO NOTHING;
+    `, id, code);
+    generated.push(code);
+  }
+  return generated;
+}
 
 // src/routes/authRoutes.ts
 var router = (0, import_express.Router)();
@@ -65114,19 +64996,26 @@ function generateReferralCode(name) {
 function normalizePhone(phone) {
   return phone.replace(/[^0-9+]/g, "");
 }
+router.get("/validate-referral/:code", async (req, res) => {
+  const code = (req.params.code || "").trim().toUpperCase();
+  const isValid = await validateAdminReferralCode(code);
+  res.json({ valid: isValid, code });
+});
 router.post("/register", async (req, res, next) => {
   try {
     const validated = registerSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
     const trimmedRefCode = (validated.referralCode || "").trim().toUpperCase();
     if (!trimmedRefCode) {
-      return res.status(400).json({ error: "A valid referral code is required to register. Registration is invite-only." });
+      return res.status(400).json({
+        error: "A valid referral code is required to register. Registration is invite-only."
+      });
     }
-    const referrer = await prisma.user.findUnique({
-      where: { referralCode: trimmedRefCode }
-    });
-    if (!referrer) {
-      return res.status(400).json({ error: "Invalid referral code provided. You must enter a valid inviter code to register." });
+    const isValidAdminCode = await validateAdminReferralCode(trimmedRefCode);
+    if (!isValidAdminCode) {
+      return res.status(400).json({
+        error: "Invalid or already used referral code. Registration requires an exclusive invitation code provided by administration."
+      });
     }
     const existingUser = await prisma.user.findUnique({
       where: { phone: normalizedPhone }
@@ -65150,10 +65039,20 @@ router.post("/register", async (req, res, next) => {
           phone: normalizedPhone,
           passwordHash,
           referralCode: userReferralCode,
-          referredById: referrer?.id || null,
+          referredById: null,
           accountStatus: "ACTIVE"
         }
       });
+      await tx.$executeRawUnsafe(`
+        UPDATE "AdminReferralCode"
+        SET "status" = 'USED',
+            "usedById" = $1,
+            "usedByName" = $2,
+            "usedByPhone" = $3,
+            "usedAt" = CURRENT_TIMESTAMP,
+            "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "code" = $4 AND "status" = 'AVAILABLE'
+      `, user.id, user.name, normalizedPhone, trimmedRefCode);
       await tx.wallet.create({
         data: {
           userId: user.id,
@@ -65177,9 +65076,6 @@ router.post("/register", async (req, res, next) => {
       }
       return user;
     });
-    if (referrer) {
-      await affiliateService.handleNewRegistration(referrer.id, result.id);
-    }
     const token = import_jsonwebtoken2.default.sign({ userId: result.id }, config2.jwtSecret, { expiresIn: "7d" });
     res.status(201).json({
       message: "Registration successful! Welcome to Earn Street.",
@@ -65483,6 +65379,233 @@ var userRoutes_default = router2;
 
 // src/routes/taskRoutes.ts
 var import_express3 = __toESM(require_express2(), 1);
+
+// src/services/affiliateService.ts
+var affiliateService = {
+  /**
+   * Fetches current affiliate and referral program settings from database
+   */
+  async getSettings() {
+    const keys = [
+      "referral_reward",
+      "referral_qualifying_condition",
+      "affiliate_program_enabled",
+      "affiliate_bronze_target",
+      "affiliate_silver_target",
+      "affiliate_gold_target",
+      "affiliate_share_template",
+      "affiliate_auto_payout",
+      "affiliate_anti_fraud"
+    ];
+    const settings = await prisma.siteSetting.findMany({
+      where: { key: { in: keys } }
+    });
+    const map2 = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+    return {
+      referralReward: parseFloat(map2.referral_reward || "250"),
+      qualifyingCondition: map2.referral_qualifying_condition || "FIRST_TASK_APPROVED",
+      affiliateProgramEnabled: map2.affiliate_program_enabled !== "false",
+      bronzeTarget: parseInt(map2.affiliate_bronze_target || "5", 10),
+      silverTarget: parseInt(map2.affiliate_silver_target || "15", 10),
+      goldTarget: parseInt(map2.affiliate_gold_target || "30", 10),
+      shareTemplate: map2.affiliate_share_template || "\u{1F451} Join Earn Street with my exclusive invite code {CODE} and earn daily cash rewards on tasks! Register here: {LINK}",
+      autoPayout: map2.affiliate_auto_payout !== "false",
+      antiFraudEnabled: map2.affiliate_anti_fraud !== "false"
+    };
+  },
+  /**
+   * Called when a user registers with a referrer code
+   */
+  async handleNewRegistration(referrerId, refereeId) {
+    const settings = await this.getSettings();
+    if (!settings.affiliateProgramEnabled) return;
+    if (referrerId === refereeId) return;
+    const isInstant = settings.qualifyingCondition === "INSTANT_ON_REGISTRATION";
+    if (isInstant) {
+      await prisma.$transaction(async (tx) => {
+        await tx.referral.upsert({
+          where: { referrerId_referredId: { referrerId, referredId: refereeId } },
+          update: {
+            qualifyingStatus: "QUALIFIED",
+            rewardStatus: "CREDITED",
+            rewardAmount: 0
+          },
+          create: {
+            referrerId,
+            referredId: refereeId,
+            qualifyingStatus: "QUALIFIED",
+            rewardStatus: "CREDITED",
+            rewardAmount: 0
+          }
+        });
+        await tx.userSpinEntitlement.create({
+          data: {
+            userId: referrerId,
+            triggerReason: `Qualified Referral Reward (New Partner ${refereeId})`,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true
+          }
+        });
+        await tx.notification.create({
+          data: {
+            userId: referrerId,
+            title: `Qualified Referral: 1 Free Spin Unlocked! \u{1F3B0}`,
+            message: `A new partner registered with your code and qualified! You earned 1 Free Royal Spin.`,
+            notificationType: "SPIN_REWARD"
+          }
+        });
+      });
+      await this.checkAmbassadorMilestones(referrerId);
+    } else {
+      await prisma.referral.upsert({
+        where: { referrerId_referredId: { referrerId, referredId: refereeId } },
+        update: {
+          qualifyingStatus: "PENDING",
+          rewardStatus: "PENDING",
+          rewardAmount: 0
+        },
+        create: {
+          referrerId,
+          referredId: refereeId,
+          qualifyingStatus: "PENDING",
+          rewardStatus: "PENDING",
+          rewardAmount: 0
+        }
+      });
+    }
+  },
+  /**
+   * Evaluates qualification criteria when events occur:
+   * 'TASK_APPROVED' | 'LEVEL_1_COMPLETED' | 'DEPOSIT_APPROVED'
+   */
+  async checkAndQualifyReferral(refereeUserId, triggerType) {
+    const settings = await this.getSettings();
+    if (!settings.affiliateProgramEnabled) return;
+    const referral = await prisma.referral.findFirst({
+      where: {
+        referredId: refereeUserId,
+        qualifyingStatus: "PENDING"
+      }
+    });
+    if (!referral) return;
+    let shouldQualify = false;
+    if (settings.qualifyingCondition === "FIRST_TASK_APPROVED" && triggerType === "TASK_APPROVED") {
+      shouldQualify = true;
+    } else if (settings.qualifyingCondition === "LEVEL_1_COMPLETED" && triggerType === "LEVEL_1_COMPLETED") {
+      shouldQualify = true;
+    } else if (settings.qualifyingCondition === "FIRST_DEPOSIT_COMPLETED" && triggerType === "DEPOSIT_APPROVED") {
+      shouldQualify = true;
+    }
+    if (!shouldQualify) return;
+    const referrerId = referral.referrerId;
+    await prisma.$transaction(async (tx) => {
+      await tx.referral.update({
+        where: { id: referral.id },
+        data: {
+          qualifyingStatus: "QUALIFIED",
+          rewardStatus: "CREDITED",
+          rewardAmount: 0
+        }
+      });
+      await tx.userSpinEntitlement.create({
+        data: {
+          userId: referrerId,
+          triggerReason: `Qualified Referral Reward (Partner ${referral.referredId})`,
+          totalSpins: 1,
+          remainingSpins: 1,
+          isEligible: true,
+          requiresAdminReview: false,
+          adminReviewed: true
+        }
+      });
+      await tx.notification.create({
+        data: {
+          userId: referrerId,
+          title: `Partner Qualified: 1 Free Spin Earned! \u{1F3B0}`,
+          message: `Your referred partner has qualified! You have earned 1 Free Spin on the Lucky Wheel. Head over to the Spin page to play!`,
+          notificationType: "SPIN_REWARD"
+        }
+      });
+    });
+    await this.checkAmbassadorMilestones(referrerId);
+  },
+  /**
+   * Checks Ambassador tier thresholds (Silver, Gold) and awards milestone perks
+   */
+  async checkAmbassadorMilestones(referrerId) {
+    const settings = await this.getSettings();
+    const qualifiedCount = await prisma.referral.count({
+      where: {
+        referrerId,
+        qualifyingStatus: "QUALIFIED"
+      }
+    });
+    if (qualifiedCount >= settings.silverTarget) {
+      const entitlementReason = `Silver Ambassador Milestone (${settings.silverTarget} Qualified Partners)`;
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
+        where: {
+          userId: referrerId,
+          triggerReason: entitlementReason
+        }
+      });
+      if (!existingSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId: referrerId,
+            triggerReason: entitlementReason,
+            totalSpins: 1,
+            remainingSpins: 1,
+            isEligible: false,
+            // Goes to admin for prize assignment
+            requiresAdminReview: true,
+            adminReviewed: false
+          }
+        });
+        await prisma.notification.create({
+          data: {
+            userId: referrerId,
+            title: `Silver Ambassador Rank Achieved! \u{1F948}`,
+            message: `Congratulations! You have reached ${settings.silverTarget} qualified partners and unlocked Silver Ambassador status plus a Free Royal Milestone Spin!`,
+            notificationType: "SPIN_REWARD"
+          }
+        });
+      }
+    }
+    if (qualifiedCount >= settings.goldTarget) {
+      const goldSpinReason = `Gold Ambassador Milestone (${settings.goldTarget} Qualified Partners)`;
+      const existingSpin = await prisma.userSpinEntitlement.findFirst({
+        where: {
+          userId: referrerId,
+          triggerReason: goldSpinReason
+        }
+      });
+      if (!existingSpin) {
+        await prisma.userSpinEntitlement.create({
+          data: {
+            userId: referrerId,
+            triggerReason: goldSpinReason,
+            totalSpins: 3,
+            remainingSpins: 3,
+            isEligible: true,
+            requiresAdminReview: false,
+            adminReviewed: true
+          }
+        });
+        await prisma.notification.create({
+          data: {
+            userId: referrerId,
+            title: `Gold Ambassador Crowned! +3 Free Spins Awarded \u{1F451}`,
+            message: `Incredible achievement! You reached ${settings.goldTarget} qualified partners, earning Gold Ambassador rank and 3 Free Royal Spins!`,
+            notificationType: "SPIN_REWARD"
+          }
+        });
+      }
+    }
+  }
+};
 
 // src/services/taskProgressionService.ts
 var taskProgressionService = {
@@ -74017,11 +74140,1298 @@ async function sendUserLiveCommand(userId, commandType, payload = {}) {
   }
 }
 
+// prisma/dataset10Levels.ts
+function cleanUrl(rawUrl) {
+  const mdMatch = rawUrl.match(/\((https?:\/\/[^\s\)]+)\)/);
+  if (mdMatch) return mdMatch[1].replace(/_+$/, "");
+  const urlMatch = rawUrl.match(/https?:\/\/[^\s\)\]]+/);
+  if (urlMatch) return urlMatch[0].replace(/_+$/, "");
+  return rawUrl.trim().replace(/^\[|\]$/g, "").replace(/_+$/, "");
+}
+var DATASET_10_LEVELS = [
+  {
+    "level": 1,
+    "title": "Study",
+    "total_tasks": 10,
+    "level_reward": 500,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/vo4pMVb0R6M?si=I1idXSAT49o8qQlA",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/00jbG_cfGuQ?si=koLvGK8-Yk-1XBbv",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/Yocja_N5s1I?si=9jvSeT6wfULOpTBX",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/B3u4EFTwprM?si=Yklgf1smjHpY-rbh",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/FrlJl2UXRU0?si=un0Uee3RG2nIciDe",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/9t5NOKVUTZo?si=rD4k5-dQY4icij07",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/tZ7lsQV95yo?si=KGD7uqw1px-uC8Fb",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/I6O_v-cYh20?si=g4enNZAw5GCqKWb",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/_phJIm8mUT8?si=NYby4z78otMFxM9",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/JSXlT_xvLko?si=su6ypDXlUoKtPUbT",
+        "commission": 10,
+        "credit_points": 10,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "title": "Vlog",
+    "total_tasks": 10,
+    "level_reward": 1e3,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/nzciqaNN4I0?si=QcGDCUl8ABo9Qlwd",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/1iJE8Lyvvls?si=yP3qFuihCpIdC5UV",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/wyBimQmMZMo?si=BM6sLmxsw3UiQetL",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/798f3txy4Zs?si=NpAZSSjCHf5sXQHn",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/M2iHz1cVKxc?si=AKicqraZOjPv3mgg",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/3cZ_QsA-Q0Q?si=EVMDukq8QHPDKnep",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/HGX31br5XD4?si=i55C748M-mSi0lts",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/pgn8wq-WRN8?si=EcwXdqRmVC9LynqC",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/UlvuMvKkg5U?si=O35IJAiVVAKTmttz",
+        "commission": 60,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Prepaid Task #2",
+        "url": "https://youtu.be/K8Y2V9AwOos?si=SxysGiMzNJ9Eg2id",
+        "commission": 120,
+        "credit_points": 30,
+        "is_prepaid": true,
+        "prepaid_value": 9500
+      }
+    ]
+  },
+  {
+    "level": 3,
+    "title": "Vlog",
+    "total_tasks": 10,
+    "level_reward": 1500,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/7vOkn4m-XCs?si=t75KaK78GG1D87ev",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/96GXqWaQcEE?si=QGeuAtrOng32KBf2",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/CZvYvUGLNMg?si=CAdnkQ9DrlGLeNji",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/APe0TO49E00?si=uzr2jUeVwfwiCEpC",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Prepaid Task #1",
+        "url": "https://youtu.be/hbHILEt52VI?si=M-5ga8nGEDax316y",
+        "commission": 160,
+        "credit_points": 30,
+        "is_prepaid": true,
+        "prepaid_value": 15e3
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/WkQrMzwqKv4?si=_eQzhwDMoiCrsDUi",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/CQpxJhN16pM?si=Huj0tEOmziuHzY-A",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/CBhRIsc_14A?si=taf3RX_E_M3_wgXs",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/F7sPLM-ThnA?si=GozFZ1wHIl4HPnSL",
+        "commission": 80,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Prepaid Task #2",
+        "url": "https://youtu.be/8T0m8f44Kgs?si=XPXvxc3B5IOOXrP-",
+        "commission": 160,
+        "credit_points": 30,
+        "is_prepaid": true,
+        "prepaid_value": 23e3
+      }
+    ]
+  },
+  {
+    "level": 4,
+    "title": "Vlog",
+    "total_tasks": 10,
+    "level_reward": 2e3,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/ew__gmVo3Nk?si=cFdkl1FDuMSy2749",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Prepaid Task #1",
+        "url": "https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe",
+        "commission": 200,
+        "credit_points": 30,
+        "is_prepaid": true,
+        "prepaid_value": 35e3
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/ZnmU_6BD0pY?si=XlE3zCfn8ufLolJ8",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/jCPcZUifbkc?si=W8SFeXKJEnh6h_BT",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/EYeG5TiE2B0?si=IdoR0rcI430rFiXP",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/veNdcvpCNRM?si=LTwSsN-0YCpuY4he",
+        "commission": 100,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Prepaid Task #2",
+        "url": "https://youtu.be/bA1j3q0Q5wo?si=IpB8KdfE9f7NA-_A",
+        "commission": 200,
+        "credit_points": 30,
+        "is_prepaid": true,
+        "prepaid_value": 5e4
+      }
+    ]
+  },
+  {
+    "level": 5,
+    "title": "Level 5",
+    "total_tasks": 10,
+    "level_reward": 2500,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/bmyXHQQctyQ?si=WE3n94_t2VjUipve",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/XgnSxvUiXO0?si=22ktWXjGWh1OOnwt",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/pmjH9erWu48?si=ZPVv0sGjxwpdQ2JW",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/HOWaPR9brOE?si=q508JZyHn6ROxrB0",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/yqH3DcxB6Dk?si=kjp1orUfY-WKbbJS",
+        "commission": 300,
+        "credit_points": 30,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/31HJbpU2RpU?si=y--XuUEVnQumEdqj",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/GwifegtMmUI?si=eP2xJ1bdsoVzTyzY",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/6Ct2D12cHqw?si=_hE-crwndkoC1pBS",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/-6kARhVxEWA?si=dB6y1GiHnaEJBRkC",
+        "commission": 150,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/yIjjg5_5Cxw?si=jD2O34ChfbY65zqA",
+        "commission": 300,
+        "credit_points": 30,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 6,
+    "title": "Level 6",
+    "total_tasks": 15,
+    "level_reward": 5e3,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/qgz-ydhRs4s?si=Il542hKwwSHMMFT3",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/XaEkHoMtc5Q?si=h0RzVrtAK9jQBRcg",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/3nYntR_BmD0?si=OqMoHNGPDd8x4853",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/8BOnFKojVYc?si=59knG1PQVKYd6gVk",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/B3j7o3RfBVI?si=nSo3Ii77SdDR4iI4",
+        "commission": 400,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/TYWrS9lbHVo?si=vylP_TFVidoIjhWL",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/Jjpfl2hgN5k?si=XhKzdxX-i616kqTs",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/t1y9vFl3LQc?si=H-TnYfPxFjrPx91H",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/esY3mHyDFi4?si=3hxcM_soqfG8GTro",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/1lCZKskfCqI?si=GiRq7gaiCzepy0ka",
+        "commission": 400,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 11,
+        "type": "Subscribe",
+        "url": "https://youtu.be/2G34ILUfSPg?si=kAQkhhfMnBzMUxgM",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 12,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/kSeHcwfE6VQ?si=-0ADsQw_4_syKx9L",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 13,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/L-uUzPvBqd8?si=jUhVHtx89nY8_nnY",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 14,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/Cek3y8wZNd8?si=wAfx4TWuvGd4KYcX",
+        "commission": 200,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 15,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/neKBxcwqsU4?si=whNCyFEItWErsb7t",
+        "commission": 400,
+        "credit_points": 14,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 7,
+    "title": "Level 7",
+    "total_tasks": 15,
+    "level_reward": 7500,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/B9WFwGvMUZg?si=0iEB2lrtL56J4cmx",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/YqedmavuG64?si=prGU4MJUaaDCnoBI",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/bA33aA83DUs?si=oOEtJwbWRdtsXZIe",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/l0EC6dvS89M?si=WlG698OLMa_adZkK",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/SJYdo3ScJDM?si=rofNESmY3HHZDE9d",
+        "commission": 500,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/nsV-B79x33I?si=aLI7nHiMwgl0yG1i",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/fCDVn0Ri2dU?si=MmFVxtjmJalzqsSQ",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/4z1OyqDyR2E?si=C0Qc5ZF84_vS-EtS",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/sSFYNRoo4r4?si=6hWH6qxt9ylI7pWi",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/Wr5X3lJ30R4?si=KHX-cBl50XRgR3D1",
+        "commission": 500,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 11,
+        "type": "Subscribe",
+        "url": "https://youtu.be/g_AZ0YMrdqA?si=3F11mD6oKWNZ0iZS",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 12,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/z5X413CeFvk?si=Wy-DnuFa7Hst6mt3",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 13,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/xum7JzyS6e8?si=EcDLPRZ13apIuVAX",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 14,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/5PPwEg1kDRE?si=NWUo_uBJcUAp7FXi",
+        "commission": 250,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 15,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/fHDijn2Il8E?si=s42SIQM3iiylVKBG",
+        "commission": 500,
+        "credit_points": 14,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 8,
+    "title": "Level 8",
+    "total_tasks": 15,
+    "level_reward": 1e4,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/OS-WTughD14?si=xyiP5FPupBzSfQ9p",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/d4M3YRLiSwM?si=D0a3oKwRCFUdkJ5B",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/nGNlcnGobAY?si=nK83aH5a-W8ph9Xv",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/hTkjqhOsgwc?si=QGKy8vK_l7vLut11",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/AGUb2Nn7pKQ?si=-3czbIuznEgR0tew",
+        "commission": 600,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/h76Q3E_9aNw?si=l3FGEQYqwFooHtvF",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/m7pxtU5qz2U?si=QoDpPdbZNjePMXMb",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/7bGRQJzAKZw?si=uwF3CcleRr4o30up",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/5Z-qAutLgHA?si=GyPFMacS3gxvVogE",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/0TCQClBCJA8?si=S9dn0asC5H9fRU8p",
+        "commission": 600,
+        "credit_points": 13,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 11,
+        "type": "Subscribe",
+        "url": "https://youtu.be/WQ3ilqvjWkA?si=_qrBM_NbqwQ59mE6",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 12,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/Y_UNYQfM4gc?si=rPviVuTWzMIP-uhO",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 13,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/ALEEcf3P2ik?si=lPeca_AjIgaEm_4B",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 14,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/ah8c4GSOdIE?si=N3lHphBCuhG1wdrR",
+        "commission": 300,
+        "credit_points": 5,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 15,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/hA9a9ZSj3zY?si=704_2oZyvqFqQsSH",
+        "commission": 600,
+        "credit_points": 14,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 9,
+    "title": "Level 9",
+    "total_tasks": 20,
+    "level_reward": 12500,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/AnYl6Nk9GOA?si=uJMUmAkCoFVqzSZ2",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/UItWltVZZmE?si=4fMmgvmTZhm9xq9s",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/Cw-Wt4xKD2s?si=HCCHU3lcQEGIOpAV",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/jC5xlKIQgR8?si=SM5t6XKxplYQIXlP",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/X8FNAzCoCoI?si=VLs5Ol5Gh2StDnzK",
+        "commission": 800,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/fsJ14Bra8Io?si=Q2E7TZ-Gi0s6Eu7A",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/4tQrUif5pHY?si=qkw8NRq_gj0mmJMW",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/Nw5rO-fmL0A?si=JzoRZ80tEG6itSRk",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/EtjXNMS3eeU?si=kxWkl392jatI2qT6",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/UV63-EXSFI8?si=amwqxlSS2QF08epH",
+        "commission": 800,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 11,
+        "type": "Subscribe",
+        "url": "https://youtu.be/oNGDopPcghA?si=N87jtZd0fqhR6sqM",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 12,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/k_NZOTYGJhY?si=sBGO9CtwPDDSgS17",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 13,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/M2vs_zjIbOw?si=_vOS90oPdeTVnZ2w",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 14,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/-4E9tAH7cfU?si=2Al-wYIi-diJ-BlS",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 15,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/tlxJv2cdlAU?si=a1g4vUtwS8Lj_m2S",
+        "commission": 800,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 16,
+        "type": "Subscribe",
+        "url": "https://youtu.be/DLGqHOMIE5c?si=f4XCCwwkd0hwxnOL",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 17,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/gjV-K4g3fm4?si=n_5RYC2-NM19_VhH",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 18,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/LhUkk8z5V5E?si=yJjzGjtCLVAhvVem",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 19,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/Idek3A89slQ?si=onRru3zLmNC-Cvt_",
+        "commission": 400,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 20,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/LK11EmCjJzQ?si=Q3s0EJYu4GKC5XWq",
+        "commission": 800,
+        "credit_points": 9,
+        "is_prepaid": false
+      }
+    ]
+  },
+  {
+    "level": 10,
+    "title": "Level 10",
+    "total_tasks": 20,
+    "level_reward": 15e3,
+    "total_credit_points": 100,
+    "tasks": [
+      {
+        "task_id": 1,
+        "type": "Subscribe",
+        "url": "https://youtu.be/Z22mFwbCrCA?si=9Yjc9AH0eRZ4FNxb",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 2,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/PGpb6Zc4KkE?si=hd0i40qWqeRPca4L",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 3,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/YHccUdhUE_Y?si=u-PDsW3JgEdo5llT",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 4,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/RVpKbiTvLWY?si=BpMN-6bpskK0ORfp",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 5,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/AJtkuFN1apc?si=ampDjQmn6PkH5PWs",
+        "commission": 1e3,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 6,
+        "type": "Subscribe",
+        "url": "https://youtu.be/k8eR5sBUCPw?si=tMuw34hpQu6CC5Fe",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 7,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/LSKRceF5ykE?si=EJkkg6RzukZppH0y",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 8,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/KPIC2P_jFfU?si=6Lcs9aV9QdjMDAGO",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 9,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/qOWVl6j87nI?si=rMV76Ws1W3PnzqpC",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 10,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/UrjimhELcok?si=WRKmKc2Gcyje6pTV",
+        "commission": 1e3,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 11,
+        "type": "Subscribe",
+        "url": "https://youtu.be/pLF0bhcY5l8?si=4cRiZSz35yJ1f8q6",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 12,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/JdPkgySQkyU?si=htapyrUIMYzOr_pE",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 13,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/OUdF9tyMlgM?si=rCXLot9IZombP88f",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 14,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/OQLWQEb-FgY?si=OOmTvdyEJb2U7VJV",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 15,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/p8ZHLMusfEk?si=G1GFQzDwT77oIEfc",
+        "commission": 1e3,
+        "credit_points": 9,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 16,
+        "type": "Subscribe",
+        "url": "https://youtu.be/mYDrGq0OHhQ?si=thc2AaWGV4GbAHAW",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 17,
+        "type": "Like and Comment",
+        "url": "https://youtu.be/-wrAWg_oSfE?si=iVDPEDYHDJV2G119",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 18,
+        "type": "Watch Video (30s)",
+        "url": "https://youtu.be/y8bFjc1gucQ?si=rwg40AmHWnb0iwIj",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 19,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/7lEqFKmCoaE?si=8HHU7uOV568gxPmn",
+        "commission": 500,
+        "credit_points": 4,
+        "is_prepaid": false
+      },
+      {
+        "task_id": 20,
+        "type": "Watch Video (45s)",
+        "url": "https://youtu.be/2toTTlle6Vs?si=lykA3vdnPTgRclZi",
+        "commission": 1e3,
+        "credit_points": 9,
+        "is_prepaid": false
+      }
+    ]
+  }
+];
+
+// src/services/taskDatasetService.ts
+var datasetSynced = false;
+async function syncDatasetTasksToDatabase() {
+  if (datasetSynced) return;
+  try {
+    for (const lvlData of DATASET_10_LEVELS) {
+      const levelNumber = lvlData.level;
+      const title = lvlData.title;
+      const requiredTaskCount = lvlData.total_tasks;
+      const completionReward = lvlData.level_reward;
+      const totalCreditPoints = lvlData.total_credit_points;
+      const level = await prisma.level.upsert({
+        where: { levelNumber },
+        update: {
+          title,
+          requiredTaskCount,
+          completionReward,
+          totalCreditPoints,
+          displayOrder: levelNumber,
+          status: "ACTIVE"
+        },
+        create: {
+          levelNumber,
+          title,
+          description: `Complete all ${requiredTaskCount} tasks in Level ${levelNumber} (${title}) to claim the PKR ${completionReward.toLocaleString()} milestone reward.`,
+          requiredTaskCount,
+          completionReward,
+          totalCreditPoints,
+          displayOrder: levelNumber,
+          status: "ACTIVE"
+        }
+      });
+      for (const t of lvlData.tasks) {
+        const taskNumber = t.task_id;
+        const type = t.type;
+        const commission = t.commission;
+        const creditPoints = t.credit_points;
+        const isPaid = t.is_prepaid;
+        const unlockFee = t.prepaid_value || 0;
+        const pureUrl = cleanUrl(t.url);
+        const taskTitle = isPaid ? `${type} (PKR ${unlockFee.toLocaleString()})` : `YouTube ${type}`;
+        const description = isPaid ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.` : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission} and ${creditPoints} credit points.`;
+        const instructions = isPaid ? `1. Ensure wallet has sufficient balance or deposit PKR ${unlockFee.toLocaleString()}.
+2. Click Unlock Task to pay fee.
+3. Open protected link: ${pureUrl}
+4. Complete engagement steps.
+5. Submit transaction and proof screenshot for admin approval.` : `1. Open link: ${pureUrl}
+2. Perform ${type} action.
+3. Take a screenshot showing proof of action.
+4. Submit reference and proof for instant admin verification.`;
+        const lockMessage = taskNumber === 1 ? levelNumber === 1 ? "Available to start" : `Complete and receive approval for all tasks in Level ${levelNumber - 1} to unlock Level ${levelNumber}.` : `Complete and receive approval for Task ${taskNumber - 1} to unlock this task.`;
+        await prisma.task.upsert({
+          where: {
+            levelId_taskNumber: {
+              levelId: level.id,
+              taskNumber
+            }
+          },
+          update: {
+            title: taskTitle,
+            description,
+            taskType: type,
+            rewardAmount: commission,
+            creditPoints,
+            isPaid,
+            unlockFee,
+            protectedUrl: pureUrl,
+            instructions,
+            lockMessage,
+            submissionInstructions: "Submit proof reference or transaction details for verification.",
+            requiresAdminApproval: true,
+            status: "ACTIVE"
+          },
+          create: {
+            levelId: level.id,
+            taskNumber,
+            title: taskTitle,
+            description,
+            taskType: type,
+            rewardAmount: commission,
+            creditPoints,
+            isPaid,
+            unlockFee,
+            protectedUrl: pureUrl,
+            instructions,
+            lockMessage,
+            submissionInstructions: "Submit proof reference or transaction details for verification.",
+            requiresAdminApproval: true,
+            status: "ACTIVE"
+          }
+        });
+      }
+    }
+    datasetSynced = true;
+    console.log("\u2705 Synchronized 10 Levels & tasks: Level 1 (Rs 10, all free), Level 2 (task 10 paid), Levels 5-10 (all free).");
+  } catch (err) {
+    console.error("Failed to sync dataset tasks to database:", err);
+  }
+}
+
 // src/routes/taskRoutes.ts
 var router3 = (0, import_express3.Router)();
 router3.get("/levels", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
+    await syncDatasetTasksToDatabase();
     const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: "asc" } }),
       prisma.userTaskProgress.findMany({
@@ -77121,6 +78531,63 @@ router11.get("/activity-logs", requireAdmin, async (req, res, next) => {
     next(err);
   }
 });
+router11.get("/referral-codes", requireAdmin, async (req, res, next) => {
+  try {
+    const data = await getAdminReferralCodesOverview();
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+router11.post("/referral-codes/generate", requireAdmin, async (req, res, next) => {
+  try {
+    const { count = 10, prefix = "ROYAL-VIP" } = req.body;
+    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100), prefix);
+    await logAdminAction({
+      adminId: req.admin.id,
+      adminUsername: req.admin.username,
+      action: "GENERATED_ADMIN_REFERRAL_CODES",
+      entityType: "AdminReferralCode",
+      entityId: `batch_${Date.now()}`,
+      newState: { count: generated.length, generated },
+      reason: `Generated ${generated.length} official invitation referral codes`,
+      ipAddress: req.ip
+    });
+    const data = await getAdminReferralCodesOverview();
+    res.json({ message: `Successfully generated ${generated.length} new referral codes!`, ...data });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.post("/referral-codes/create", requireAdmin, async (req, res, next) => {
+  try {
+    const { code, notes } = external_exports.object({
+      code: external_exports.string().min(3).max(30),
+      notes: external_exports.string().optional()
+    }).parse(req.body);
+    const formattedCode = code.trim().toUpperCase();
+    await ensureAdminReferralCodes();
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+      VALUES ($1, $2, 'AVAILABLE', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT ("code") DO NOTHING;
+    `, `arc_custom_${Date.now()}`, formattedCode, notes || "Custom Admin Code");
+    await logAdminAction({
+      adminId: req.admin.id,
+      adminUsername: req.admin.username,
+      action: "CREATED_CUSTOM_REFERRAL_CODE",
+      entityType: "AdminReferralCode",
+      entityId: formattedCode,
+      newState: { code: formattedCode },
+      reason: notes || "Admin added custom invitation code",
+      ipAddress: req.ip
+    });
+    const data = await getAdminReferralCodesOverview();
+    res.json({ message: `Code "${formattedCode}" created successfully!`, ...data });
+  } catch (err) {
+    next(err);
+  }
+});
 var adminRoutes_default = router11;
 
 // src/middleware/errorHandler.ts
@@ -77176,8 +78643,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-XkjKVoLe.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-Dd4xDWgh.css">
+    <script type="module" crossorigin src="/assets/main-CNXECH5U.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-DWd_DprA.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
