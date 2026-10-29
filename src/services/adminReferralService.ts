@@ -40,8 +40,10 @@ export async function ensureAdminReferralCodes(): Promise<void> {
     `);
 
     await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "AdminReferralCode_status_idx" ON "AdminReferralCode"("status");
-      CREATE INDEX IF NOT EXISTS "AdminReferralCode_code_idx" ON "AdminReferralCode"("code");
+      CREATE INDEX IF NOT EXISTS "AdminReferralCode_status_idx" ON "AdminReferralCode"("status")
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "AdminReferralCode_code_idx" ON "AdminReferralCode"("code")
     `);
 
     // 2. Count existing codes
