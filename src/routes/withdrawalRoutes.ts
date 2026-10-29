@@ -26,19 +26,33 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Calculate level progression and withdrawal limit (10% of total balance on every completed level)
+    // Calculate level progression and withdrawal limit
     const levels = await prisma.level.findMany({ orderBy: { levelNumber: 'asc' } });
     let completedLevelsCount = 0;
     for (const lvl of levels) {
       const approvedCount = await prisma.userTaskProgress.count({
         where: { userId, task: { levelId: lvl.id }, status: 'APPROVED' },
       });
-      if (approvedCount >= 10) completedLevelsCount++;
+      if (approvedCount >= (lvl.requiredTaskCount || 10)) completedLevelsCount++;
     }
-    const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
+
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
     const availableBalance = wallet?.availableBalance || 0;
-    const maxWithdrawableAmount = Math.floor((availableBalance * eligiblePercent) / 100);
+
+    let eligiblePercent = 0;
+    let maxWithdrawableAmount = 0;
+
+    if (completedLevelsCount === 1) {
+      // Level 1: Client can withdraw total Level 1 reward of PKR 150
+      eligiblePercent = 100;
+      maxWithdrawableAmount = Math.min(150, availableBalance);
+    } else if (completedLevelsCount > 1) {
+      eligiblePercent = 10;
+      maxWithdrawableAmount = Math.max(
+        Math.min(150, availableBalance),
+        Math.floor((availableBalance * eligiblePercent) / 100)
+      );
+    }
 
     res.json({
       withdrawals,
@@ -71,7 +85,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       });
     }
 
-    // Calculate exact amount available for withdrawal (10% of total account balance on every completed level)
+    // Calculate amount available for withdrawal (Full PKR 150 on Level 1 completion, 10% on subsequent levels)
     let exactAvailable = wallet.availableBalance;
     if (process.env.NODE_ENV !== 'test') {
       const allLevels = await prisma.level.findMany();
@@ -80,17 +94,24 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         const approved = await prisma.userTaskProgress.count({
           where: { userId, task: { levelId: lvl.id }, status: 'APPROVED' },
         });
-        if (approved >= 10) completedLevels++;
+        if (approved >= (lvl.requiredTaskCount || 10)) completedLevels++;
       }
 
-      const percent = completedLevels >= 1 ? 10 : 0;
-      if (percent <= 0 && completedLevels === 0) {
+      if (completedLevels === 0) {
         return res.status(400).json({
-          error: 'Withdrawals unlock on level completion. Complete all 10 tasks in Level 1 to unlock your 10% account balance withdrawal quota!',
+          error: 'Withdrawals unlock on level completion. Complete all 10 tasks in Level 1 to withdraw your PKR 150 reward!',
         });
       }
 
-      exactAvailable = Math.floor((wallet.availableBalance * percent) / 100);
+      if (completedLevels === 1) {
+        exactAvailable = Math.min(150, wallet.availableBalance);
+      } else {
+        const percent = 10;
+        exactAvailable = Math.max(
+          Math.min(150, wallet.availableBalance),
+          Math.floor((wallet.availableBalance * percent) / 100)
+        );
+      }
     }
 
     if (exactAvailable <= 0) {
@@ -99,10 +120,9 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       });
     }
 
-    // Withdrawal can ONLY be for the exact amount that is available for withdrawal
-    if (Math.abs(validated.amount - exactAvailable) > 0.01) {
+    if (validated.amount > exactAvailable || validated.amount <= 0) {
       return res.status(400).json({
-        error: `Withdrawal can only be requested for the exact available amount of PKR ${exactAvailable.toLocaleString()}. Custom or partial amounts are not permitted.`,
+        error: `Withdrawal amount must not exceed available withdrawable quota of PKR ${exactAvailable.toLocaleString()}.`,
         exactAvailable,
       });
     }
