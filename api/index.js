@@ -65626,76 +65626,31 @@ var taskProgressionService = {
     if (!level) {
       throw new Error(`Level ${levelNumber} not found`);
     }
-    let isLevelUnlocked = false;
-    if (levelNumber === 1) {
-      isLevelUnlocked = true;
-    } else {
-      const prevLevel = await prisma.level.findUnique({
-        where: { levelNumber: levelNumber - 1 }
-      });
-      if (prevLevel) {
-        const [prevUserProgressCount, prevSubmissionsCount, prevLevelProgress] = await Promise.all([
-          prisma.userTaskProgress.count({
-            where: {
-              userId,
-              task: { levelId: prevLevel.id },
-              status: "APPROVED"
-            }
-          }),
-          prisma.taskSubmission.count({
-            where: {
-              userId,
-              task: { levelId: prevLevel.id },
-              status: "APPROVED"
-            }
-          }),
-          prisma.userLevelProgress.findUnique({
-            where: { userId_levelId: { userId, levelId: prevLevel.id } }
-          })
-        ]);
-        const approvedCount = Math.max(
-          prevUserProgressCount,
-          prevSubmissionsCount,
-          prevLevelProgress?.approvedTaskCount || 0
-        );
-        isLevelUnlocked = approvedCount >= (prevLevel.requiredTaskCount || 10) || prevLevelProgress?.completionStatus === "COMPLETED";
-      }
-    }
-    if (!isLevelUnlocked) {
-      const lockedTasks = level.tasks.map((task) => {
-        const isPrepaidTask = Boolean(
-          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
-        );
-        return {
-          id: task.id,
-          levelId: task.levelId,
-          taskNumber: task.taskNumber,
-          title: `Task #${task.taskNumber}`,
-          description: `Locked assignment. Complete Level ${level.levelNumber - 1} to unlock.`,
-          taskType: "Task",
-          rewardAmount: task.rewardAmount,
-          creditPoints: isPrepaidTask ? 30 : 5,
-          isPaid: false,
-          unlockFee: 0,
-          requiresAdminApproval: task.requiresAdminApproval,
-          status: task.status,
-          userStatus: "LOCKED",
-          isPaidUnlocked: false,
-          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
-          instructions: null,
-          protectedUrl: null,
-          submissionInstructions: null,
-          externalContact: null,
-          submission: null
-        };
-      });
-      return {
-        level,
-        tasks: lockedTasks,
-        isLevelUnlocked: false
-      };
-    }
-    const [wallet, userProgressRecords, submissions] = await Promise.all([
+    const [
+      allLevels,
+      userTaskProgressList,
+      userLevelProgressList,
+      userSubmissionsList,
+      wallet,
+      currentLevelProgressRecords,
+      currentLevelSubmissions
+    ] = await Promise.all([
+      prisma.level.findMany({
+        select: { id: true, levelNumber: true, requiredTaskCount: true },
+        orderBy: { levelNumber: "asc" }
+      }),
+      prisma.userTaskProgress.findMany({
+        where: { userId, status: "APPROVED" },
+        select: { task: { select: { levelId: true, id: true } } }
+      }),
+      prisma.userLevelProgress.findMany({
+        where: { userId },
+        select: { levelId: true, approvedTaskCount: true, completionStatus: true }
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId, status: "APPROVED" },
+        select: { task: { select: { levelId: true, id: true } } }
+      }),
       prisma.wallet.findUnique({
         where: { userId },
         select: { availableBalance: true }
@@ -65714,37 +65669,159 @@ var taskProgressionService = {
         orderBy: { createdAt: "desc" }
       })
     ]);
-    const userBalance = wallet?.availableBalance || 0;
-    const progressMap = new Map(userProgressRecords.map((p) => [p.taskId, p]));
+    const approvedTasksByLevelId = /* @__PURE__ */ new Map();
+    for (const p of userTaskProgressList) {
+      if (p.task?.levelId && p.task?.id) {
+        if (!approvedTasksByLevelId.has(p.task.levelId)) {
+          approvedTasksByLevelId.set(p.task.levelId, /* @__PURE__ */ new Set());
+        }
+        approvedTasksByLevelId.get(p.task.levelId).add(p.task.id);
+      }
+    }
+    for (const s of userSubmissionsList) {
+      if (s.task?.levelId && s.task?.id) {
+        if (!approvedTasksByLevelId.has(s.task.levelId)) {
+          approvedTasksByLevelId.set(s.task.levelId, /* @__PURE__ */ new Set());
+        }
+        approvedTasksByLevelId.get(s.task.levelId).add(s.task.id);
+      }
+    }
+    const levelProgressByLevelId = /* @__PURE__ */ new Map();
+    for (const lp of userLevelProgressList) {
+      levelProgressByLevelId.set(lp.levelId, lp);
+    }
+    const levelStatsByNumber = /* @__PURE__ */ new Map();
+    for (const lvl of allLevels) {
+      const taskSet = approvedTasksByLevelId.get(lvl.id);
+      const lp = levelProgressByLevelId.get(lvl.id);
+      const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
+      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+      levelStatsByNumber.set(lvl.levelNumber, { approvedCount, isCompleted });
+    }
+    const l1Completed = levelStatsByNumber.get(1)?.isCompleted || false;
+    const l2Completed = l1Completed && (levelStatsByNumber.get(2)?.isCompleted || false);
+    const l3Completed = l2Completed && (levelStatsByNumber.get(3)?.isCompleted || false);
+    const isLevel4Unlocked = l3Completed;
+    let isLevelUnlocked = false;
+    if (levelNumber === 1) {
+      isLevelUnlocked = true;
+    } else if (levelNumber === 2) {
+      isLevelUnlocked = l1Completed;
+    } else if (levelNumber === 3) {
+      isLevelUnlocked = l2Completed;
+    } else {
+      isLevelUnlocked = isLevel4Unlocked;
+    }
+    let isTask1Eligible = false;
+    let task1LockMessage = "";
+    if (!isLevelUnlocked) {
+      isTask1Eligible = false;
+      task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
+    } else if (levelNumber === 1) {
+      isTask1Eligible = true;
+    } else if (levelNumber === 2) {
+      isTask1Eligible = l1Completed;
+      if (!isTask1Eligible) {
+        task1LockMessage = "Complete all tasks in Level 1 first to unlock Level 2 tasks.";
+      }
+    } else if (levelNumber === 3) {
+      isTask1Eligible = l2Completed;
+      if (!isTask1Eligible) {
+        task1LockMessage = "Complete all tasks in Level 2 first to unlock Level 3 tasks.";
+      }
+    } else if (levelNumber === 4) {
+      isTask1Eligible = l3Completed;
+      if (!isTask1Eligible) {
+        task1LockMessage = "Complete all tasks in Level 3 first to unlock Level 4 tasks.";
+      }
+    } else if (levelNumber === 5) {
+      const l4ApprovedCount = levelStatsByNumber.get(4)?.approvedCount || 0;
+      isTask1Eligible = l4ApprovedCount >= 1;
+      if (!isTask1Eligible) {
+        task1LockMessage = "Complete Task 1 in Level 4 first to be able to complete Level 5 tasks.";
+      }
+    } else {
+      const prevStats = levelStatsByNumber.get(levelNumber - 1);
+      isTask1Eligible = prevStats?.isCompleted || false;
+      if (!isTask1Eligible) {
+        task1LockMessage = `Complete all tasks in Level ${levelNumber - 1} first to start Level ${levelNumber} tasks.`;
+      }
+    }
+    if (!isLevelUnlocked) {
+      const lockedTasks = level.tasks.map((task) => {
+        const isPrepaidTask = Boolean(
+          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
+        );
+        return {
+          id: task.id,
+          levelId: task.levelId,
+          taskNumber: task.taskNumber,
+          title: task.title,
+          description: task.description,
+          taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
+          rewardAmount: task.rewardAmount,
+          creditPoints: isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
+          isPaid: Boolean(task.isPaid),
+          unlockFee: task.unlockFee || 0,
+          requiresAdminApproval: task.requiresAdminApproval,
+          status: task.status,
+          userStatus: "LOCKED",
+          isPaidUnlocked: false,
+          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
+          instructions: null,
+          protectedUrl: null,
+          submissionInstructions: null,
+          externalContact: null,
+          submission: null
+        };
+      });
+      return {
+        level,
+        tasks: lockedTasks,
+        isLevelUnlocked: false
+      };
+    }
+    const progressMap = new Map(currentLevelProgressRecords.map((p) => [p.taskId, p]));
     const submissionMap = /* @__PURE__ */ new Map();
-    for (const s of submissions) {
+    for (const s of currentLevelSubmissions) {
       if (!submissionMap.has(s.taskId)) {
         submissionMap.set(s.taskId, s);
       }
     }
     const evaluatedTasks = [];
-    let previousTaskApproved = isLevelUnlocked;
+    let previousTaskApproved = isTask1Eligible;
     for (const task of level.tasks) {
       const progress = progressMap.get(task.id);
       const submission = submissionMap.get(task.id);
       let userStatus = "LOCKED";
       let isPaidUnlocked = progress?.isPaidUnlocked || false;
       const isApproved = progress?.status === "APPROVED" || submission?.status === "APPROVED";
-      const prevTask = level.tasks.find((t) => t.taskNumber === task.taskNumber - 1);
-      const prevProgress = prevTask ? progressMap.get(prevTask.id) : null;
-      const prevSubmission = prevTask ? submissionMap.get(prevTask.id) : null;
-      const isPrecedingTaskApproved = task.taskNumber === 1 ? isLevelUnlocked : !prevTask || prevProgress?.status === "APPROVED" || prevSubmission?.status === "APPROVED" || previousTaskApproved;
+      let isPrerequisiteSatisfied = false;
+      let taskLockMessage = "";
+      if (task.taskNumber === 1) {
+        isPrerequisiteSatisfied = isTask1Eligible;
+        if (!isPrerequisiteSatisfied) {
+          taskLockMessage = task1LockMessage;
+        }
+      } else {
+        const prevTask = level.tasks.find((t) => t.taskNumber === task.taskNumber - 1);
+        const prevProgress = prevTask ? progressMap.get(prevTask.id) : null;
+        const prevSubmission = prevTask ? submissionMap.get(prevTask.id) : null;
+        const isPrevApproved = prevProgress?.status === "APPROVED" || prevSubmission?.status === "APPROVED" || previousTaskApproved;
+        isPrerequisiteSatisfied = isPrevApproved;
+        if (!isPrerequisiteSatisfied) {
+          taskLockMessage = `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first in proper sequence.`;
+        }
+      }
       if (task.status === "DISABLED") {
         userStatus = "DISABLED";
-      } else if (!isLevelUnlocked) {
-        userStatus = "LOCKED";
       } else if (isApproved) {
         userStatus = "APPROVED";
       } else if (submission?.status === "PENDING" || progress?.status === "PENDING_VERIFICATION") {
         userStatus = "PENDING_VERIFICATION";
       } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
         userStatus = "REJECTED";
-      } else if (isPrecedingTaskApproved) {
+      } else if (isPrerequisiteSatisfied) {
         userStatus = "AVAILABLE";
         if (task.isPaid && isPaidUnlocked) {
           isPaidUnlocked = true;
@@ -65762,18 +65839,20 @@ var taskProgressionService = {
         id: task.id,
         levelId: task.levelId,
         taskNumber: task.taskNumber,
-        title: isLocked ? `Task #${task.taskNumber}` : task.title,
-        description: isLocked ? "Complete previous task to unlock details." : task.description,
-        taskType: isLocked ? "Task" : task.taskType,
+        title: task.title,
+        // Appearable! Real task title
+        description: task.description,
+        // Appearable! Real description
+        taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
         rewardAmount: task.rewardAmount,
         creditPoints: isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
-        isPaid: isLocked ? false : task.isPaid,
-        unlockFee: isLocked ? 0 : task.unlockFee,
+        isPaid: Boolean(task.isPaid),
+        unlockFee: task.unlockFee || 0,
         requiresAdminApproval: task.requiresAdminApproval,
         status: task.status,
         userStatus,
         isPaidUnlocked,
-        lockMessage: isLocked ? task.lockMessage || `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first.` : "",
+        lockMessage: isLocked ? taskLockMessage || task.lockMessage || `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first in proper sequence.` : "",
         instructions: hasAccessToProtectedContent && !isLocked ? task.instructions : null,
         protectedUrl: hasAccessToProtectedContent && !isLocked ? task.protectedUrl : null,
         submissionInstructions: hasAccessToProtectedContent && !isLocked ? task.submissionInstructions : null,
@@ -75477,15 +75556,31 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
     for (const lp of userLevelProgressList) {
       levelProgressMap.set(lp.levelId, lp);
     }
-    const levelsWithProgress = [];
-    let previousLevelCompleted = true;
+    const levelStats = /* @__PURE__ */ new Map();
     for (const lvl of levels) {
       const taskSet = approvedTasksByLevel.get(lvl.id);
       const lp = levelProgressMap.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10);
-      const isUnlocked = lvl.levelNumber === 1 || previousLevelCompleted;
-      levelsWithProgress.push({
+      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+      levelStats.set(lvl.levelNumber, { level: lvl, approvedCount, isCompleted });
+    }
+    const level1Completed = levelStats.get(1)?.isCompleted || false;
+    const level2Completed = level1Completed && (levelStats.get(2)?.isCompleted || false);
+    const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
+    const isLevel4Unlocked = level3Completed;
+    const levelsWithProgress = levels.map((lvl) => {
+      const stats = levelStats.get(lvl.levelNumber);
+      let isUnlocked = false;
+      if (lvl.levelNumber === 1) {
+        isUnlocked = true;
+      } else if (lvl.levelNumber === 2) {
+        isUnlocked = level1Completed;
+      } else if (lvl.levelNumber === 3) {
+        isUnlocked = level2Completed;
+      } else {
+        isUnlocked = isLevel4Unlocked;
+      }
+      return {
         id: lvl.id,
         levelNumber: lvl.levelNumber,
         title: lvl.title,
@@ -75494,12 +75589,11 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
         requiredTaskCount: lvl.requiredTaskCount,
         completionReward: lvl.completionReward,
         totalCreditPoints: lvl.totalCreditPoints ?? 100,
-        approvedTaskCount: approvedCount,
-        isCompleted,
+        approvedTaskCount: stats.approvedCount,
+        isCompleted: stats.isCompleted,
         isUnlocked
-      });
-      previousLevelCompleted = isCompleted;
-    }
+      };
+    });
     res.json({ levels: levelsWithProgress });
   } catch (err) {
     next(err);

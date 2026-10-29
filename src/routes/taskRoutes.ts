@@ -56,18 +56,35 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
       levelProgressMap.set(lp.levelId, lp);
     }
 
-    const levelsWithProgress = [];
-    let previousLevelCompleted = true;
-
+    const levelStats = new Map<number, { level: any; approvedCount: number; isCompleted: boolean }>();
     for (const lvl of levels) {
       const taskSet = approvedTasksByLevel.get(lvl.id);
       const lp = levelProgressMap.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
+      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
+      levelStats.set(lvl.levelNumber, { level: lvl, approvedCount, isCompleted });
+    }
 
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10);
-      const isUnlocked = lvl.levelNumber === 1 || previousLevelCompleted;
+    const level1Completed = levelStats.get(1)?.isCompleted || false;
+    const level2Completed = level1Completed && (levelStats.get(2)?.isCompleted || false);
+    const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
+    const isLevel4Unlocked = level3Completed;
 
-      levelsWithProgress.push({
+    const levelsWithProgress = levels.map((lvl) => {
+      const stats = levelStats.get(lvl.levelNumber)!;
+      let isUnlocked = false;
+      if (lvl.levelNumber === 1) {
+        isUnlocked = true;
+      } else if (lvl.levelNumber === 2) {
+        isUnlocked = level1Completed;
+      } else if (lvl.levelNumber === 3) {
+        isUnlocked = level2Completed;
+      } else {
+        // Levels 4 through 10: all unlocked as soon as Level 4 is unlocked (Level 3 completed)!
+        isUnlocked = isLevel4Unlocked;
+      }
+
+      return {
         id: lvl.id,
         levelNumber: lvl.levelNumber,
         title: lvl.title,
@@ -76,13 +93,11 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
         requiredTaskCount: lvl.requiredTaskCount,
         completionReward: lvl.completionReward,
         totalCreditPoints: (lvl as any).totalCreditPoints ?? 100,
-        approvedTaskCount: approvedCount,
-        isCompleted,
+        approvedTaskCount: stats.approvedCount,
+        isCompleted: stats.isCompleted,
         isUnlocked,
-      });
-
-      previousLevelCompleted = isCompleted;
-    }
+      };
+    });
 
     res.json({ levels: levelsWithProgress });
   } catch (err) {
