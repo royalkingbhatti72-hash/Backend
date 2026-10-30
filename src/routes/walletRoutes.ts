@@ -17,7 +17,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
 
     if (!wallet) {
       wallet = await prisma.wallet.create({
-        data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, totalWithdrawn: 0, totalUnlockFees: 0 },
+        data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, totalWithdrawn: 0, totalUnlockFees: 0, creditPoints: 100 },
       });
     }
 

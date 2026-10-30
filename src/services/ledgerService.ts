@@ -48,7 +48,7 @@ export const ledgerService = {
       let wallet = await tx.wallet.findUnique({ where: { userId } });
       if (!wallet) {
         wallet = await tx.wallet.create({
-          data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0 },
+          data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, creditPoints: 100 },
         });
       }
 

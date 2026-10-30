@@ -69,7 +69,7 @@ model Level {
   status            String   @default("ACTIVE") // ACTIVE, DISABLED
   requiredTaskCount Int      @default(10)
   completionReward  Float    @default(0)
-  totalCreditPoints Int      @default(100)
+  totalCreditPoints Int      @default(0)
   displayOrder      Int      @default(1)
   bannerUrl         String?
   createdAt         DateTime @default(now())
@@ -87,7 +87,7 @@ model Task {
   description           String
   taskType              String   @default("Custom Task") // Social Media, YouTube Promotion, Follow Page, Comment on Post, Watch Video, Join Group, App Installation, Survey, Referral, Custom Task
   rewardAmount          Float    @default(0)
-  creditPoints          Int      @default(5)
+  creditPoints          Int      @default(0)
   isPaid                Boolean  @default(false)
   unlockFee             Float    @default(0)
   protectedUrl          String?
@@ -191,7 +191,7 @@ model Wallet {
   totalDeposited   Float    @default(0)
   totalWithdrawn   Float    @default(0)
   totalUnlockFees  Float    @default(0)
-  creditPoints     Int      @default(0)
+  creditPoints     Int      @default(100)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

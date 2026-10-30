@@ -117,49 +117,8 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       remainingSpins: entitlement?.remainingSpins || 0,
     };
 
-    // Calculate expected credit points from all approved tasks:
-    // 5 CPs for standard tasks (1-4, 6-9), 30 CPs for prepaid tasks (5 & 10)
-    // Yields exactly 100 CPs per completed level
-    const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
-      const task = prog.task;
-      if (!task) return sum;
-      const isPrepaid = Boolean(
-        task.isPaid ||
-        (task.unlockFee && task.unlockFee > 0) ||
-        task.taskType?.toLowerCase().includes('prepaid') ||
-        task.taskNumber === 5 ||
-        task.taskNumber === 10 ||
-        task.taskNumber === 15 ||
-        task.taskNumber === 20
-      );
-      const points = isPrepaid
-        ? (task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30)
-        : (task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5);
-      return sum + points;
-    }, 0);
-
-    let creditPoints = user.wallet?.creditPoints ?? 0;
-
-    // Self-healing: If user's wallet credit points are less than earned from approved tasks,
-    // verify if an admin has intentionally deducted points. If not, auto-heal to the earned total.
-    if (calculatedCreditPoints > creditPoints && allApprovedProgress.length > 0) {
-      const adminDeduction = await prisma.adminAuditLog.findFirst({
-        where: {
-          entityType: 'Wallet',
-          entityId: user.wallet?.id,
-          action: 'ADMIN_CREDIT_POINTS_DEDUCT',
-        },
-      });
-
-      if (!adminDeduction) {
-        await prisma.wallet.update({
-          where: { userId },
-          data: { creditPoints: calculatedCreditPoints },
-        });
-        creditPoints = calculatedCreditPoints;
-        if (user.wallet) user.wallet.creditPoints = calculatedCreditPoints;
-      }
-    }
+    // Credit points are 100 upon joining and can only be increased or decreased by the Admin Panel
+    const creditPoints = user.wallet?.creditPoints ?? 100;
 
     // 10% of total balance upon completing Level 1 (and 10% on every level, not cumulative 20%)
     const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
@@ -186,7 +145,7 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
             totalEarned: 0,
             totalDeposited: 0,
             totalWithdrawn: 0,
-            creditPoints: 0,
+            creditPoints: 100,
           },
       withdrawalEligibility: {
         completedLevelsCount,

@@ -65055,14 +65055,15 @@ router.post("/register", async (req, res, next) => {
             "updatedAt" = CURRENT_TIMESTAMP
         WHERE "code" = $4 AND "status" = 'AVAILABLE'
       `, user.id, user.name, normalizedPhone, trimmedRefCode);
-      await tx.wallet.create({
+      const wallet = await tx.wallet.create({
         data: {
           userId: user.id,
           currency: "PKR",
           availableBalance: 0,
           pendingBalance: 0,
           totalEarned: 0,
-          totalDeposited: 0
+          totalDeposited: 0,
+          creditPoints: 100
         }
       });
       const level1 = await tx.level.findUnique({ where: { levelNumber: 1 } });
@@ -65076,7 +65077,7 @@ router.post("/register", async (req, res, next) => {
           }
         });
       }
-      return user;
+      return { ...user, wallet };
     });
     const token = import_jsonwebtoken2.default.sign({ userId: result.id }, config2.jwtSecret, { expiresIn: "7d" });
     res.status(201).json({
@@ -65087,7 +65088,8 @@ router.post("/register", async (req, res, next) => {
         name: result.name,
         phone: result.phone,
         referralCode: result.referralCode,
-        accountStatus: result.accountStatus
+        accountStatus: result.accountStatus,
+        wallet: result.wallet
       }
     });
   } catch (err) {
@@ -65255,33 +65257,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       canSpin: !!entitlement,
       remainingSpins: entitlement?.remainingSpins || 0
     };
-    const calculatedCreditPoints = allApprovedProgress.reduce((sum, prog) => {
-      const task = prog.task;
-      if (!task) return sum;
-      const isPrepaid = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
-      );
-      const points = isPrepaid ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
-      return sum + points;
-    }, 0);
-    let creditPoints = user.wallet?.creditPoints ?? 0;
-    if (calculatedCreditPoints > creditPoints && allApprovedProgress.length > 0) {
-      const adminDeduction = await prisma.adminAuditLog.findFirst({
-        where: {
-          entityType: "Wallet",
-          entityId: user.wallet?.id,
-          action: "ADMIN_CREDIT_POINTS_DEDUCT"
-        }
-      });
-      if (!adminDeduction) {
-        await prisma.wallet.update({
-          where: { userId },
-          data: { creditPoints: calculatedCreditPoints }
-        });
-        creditPoints = calculatedCreditPoints;
-        if (user.wallet) user.wallet.creditPoints = calculatedCreditPoints;
-      }
-    }
+    const creditPoints = user.wallet?.creditPoints ?? 100;
     const eligiblePercent = completedLevelsCount >= 1 ? 10 : 0;
     const availableBalance = user.wallet?.availableBalance || 0;
     const maxWithdrawableAmount = Math.floor(availableBalance * eligiblePercent / 100);
@@ -65303,7 +65279,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
         totalEarned: 0,
         totalDeposited: 0,
         totalWithdrawn: 0,
-        creditPoints: 0
+        creditPoints: 100
       },
       withdrawalEligibility: {
         completedLevelsCount,
@@ -65760,7 +65736,7 @@ var taskProgressionService = {
           description: task.description,
           taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
           rewardAmount: task.rewardAmount,
-          creditPoints: isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
+          creditPoints: 0,
           isPaid: Boolean(task.isPaid),
           unlockFee: task.unlockFee || 0,
           requiresAdminApproval: task.requiresAdminApproval,
@@ -65845,7 +65821,7 @@ var taskProgressionService = {
         // Appearable! Real description
         taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
         rewardAmount: task.rewardAmount,
-        creditPoints: isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? task.creditPoints : 30 : task.creditPoints && task.creditPoints > 0 ? task.creditPoints : 5,
+        creditPoints: 0,
         isPaid: Boolean(task.isPaid),
         unlockFee: task.unlockFee || 0,
         requiresAdminApproval: task.requiresAdminApproval,
@@ -75425,7 +75401,7 @@ async function syncDatasetTasksToDatabase() {
       const title = lvlData.title;
       const requiredTaskCount = lvlData.total_tasks;
       const completionReward = lvlData.level_reward;
-      const totalCreditPoints = lvlData.total_credit_points;
+      const totalCreditPoints = 0;
       const level = await prisma.level.upsert({
         where: { levelNumber },
         update: {
@@ -75451,12 +75427,12 @@ async function syncDatasetTasksToDatabase() {
         const taskNumber = t.task_id;
         const type = t.type;
         const commission = t.commission;
-        const creditPoints = t.credit_points;
+        const creditPoints = 0;
         const isPaid = t.is_prepaid;
         const unlockFee = t.prepaid_value || 0;
         const pureUrl = cleanUrl(t.url);
         const taskTitle = isPaid ? `${type} (PKR ${unlockFee.toLocaleString()})` : `YouTube ${type}`;
-        const description = isPaid ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.` : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission} and ${creditPoints} credit points.`;
+        const description = isPaid ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} upon completion.` : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission}.`;
         const instructions = isPaid ? `1. Ensure wallet has sufficient balance or deposit PKR ${unlockFee.toLocaleString()}.
 2. Click Unlock Task to pay fee.
 3. Open protected link: ${pureUrl}
@@ -75588,7 +75564,7 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
         status: lvl.status,
         requiredTaskCount: lvl.requiredTaskCount,
         completionReward: lvl.completionReward,
-        totalCreditPoints: lvl.totalCreditPoints ?? 100,
+        totalCreditPoints: 0,
         approvedTaskCount: stats.approvedCount,
         isCompleted: stats.isCompleted,
         isUnlocked
@@ -75888,7 +75864,7 @@ router4.get("/", requireAuth, async (req, res, next) => {
     });
     if (!wallet) {
       wallet = await prisma.wallet.create({
-        data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, totalWithdrawn: 0, totalUnlockFees: 0 }
+        data: { userId, availableBalance: 0, pendingBalance: 0, totalEarned: 0, totalDeposited: 0, totalWithdrawn: 0, totalUnlockFees: 0, creditPoints: 100 }
       });
     }
     res.json({ wallet });
@@ -77084,7 +77060,7 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
       accountStatus: u.accountStatus,
       createdAt: u.createdAt,
       walletBalance: u.wallet?.availableBalance || 0,
-      creditPoints: u.wallet?.creditPoints ?? 0,
+      creditPoints: u.wallet?.creditPoints ?? 100,
       approvedTasksCount: u._count.taskProgress,
       referralsCount: u._count.referrals
     }));
@@ -77277,7 +77253,7 @@ router11.get("/users/:userId/summary", requireAdmin, async (req, res, next) => {
         accountStatus: u.accountStatus,
         createdAt: u.createdAt,
         walletBalance: u.wallet?.availableBalance || 0,
-        creditPoints: u.wallet?.creditPoints ?? 0,
+        creditPoints: u.wallet?.creditPoints ?? 100,
         approvedTasksCount: u._count.taskProgress,
         referralsCount: u._count.referrals
       }
@@ -77418,7 +77394,7 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
       include: { wallet: true }
     });
     if (!user) return res.status(404).json({ error: "User not found" });
-    const currentPoints = user.wallet?.creditPoints || 0;
+    const currentPoints = user.wallet?.creditPoints ?? 100;
     if (actionType === "DEDUCT" && currentPoints < points) {
       return res.status(400).json({
         error: `Cannot deduct ${points} credit points. Current balance is only ${currentPoints} CPs. Negative credit points are not allowed.`
@@ -77427,9 +77403,17 @@ router11.post("/users/:userId/adjust-credit-points", requireAdmin, async (req, r
     const finalPointsDelta = actionType === "ADD" ? points : -points;
     const newPoints = currentPoints + finalPointsDelta;
     const result = await prisma.$transaction(async (tx) => {
-      const updatedWallet = await tx.wallet.update({
+      const updatedWallet = await tx.wallet.upsert({
         where: { userId },
-        data: {
+        update: {
+          creditPoints: newPoints
+        },
+        create: {
+          userId,
+          availableBalance: 0,
+          pendingBalance: 0,
+          totalEarned: 0,
+          totalDeposited: 0,
           creditPoints: newPoints
         }
       });
@@ -77643,10 +77627,6 @@ async function executeReviewSubmissionCore(params) {
   }
   const { user, task } = submission;
   if (action === "APPROVE") {
-    const isPrepaidTask = Boolean(
-      task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid") || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20
-    );
-    const creditPointsToAdd = isPrepaidTask ? task.creditPoints && task.creditPoints > 5 ? Number(task.creditPoints) : 30 : task.creditPoints && task.creditPoints > 0 ? Number(task.creditPoints) : 5;
     const taskRewardToAdd = Number(task.rewardAmount || 0);
     const result = await prisma.$transaction(async (tx) => {
       const updatedSub2 = await tx.taskSubmission.update({
@@ -77692,41 +77672,35 @@ async function executeReviewSubmissionCore(params) {
         }
       });
       let updatedWallet2 = await tx.wallet.findUnique({ where: { userId: user.id } });
-      if (!wasAlreadyApproved) {
-        const walletUpdateData = {
-          creditPoints: { increment: creditPointsToAdd }
-        };
-        if (taskRewardToAdd > 0) {
-          walletUpdateData.availableBalance = { increment: taskRewardToAdd };
-          walletUpdateData.totalEarned = { increment: taskRewardToAdd };
-        }
+      if (!wasAlreadyApproved && taskRewardToAdd > 0) {
         updatedWallet2 = await tx.wallet.update({
           where: { userId: user.id },
-          data: walletUpdateData
+          data: {
+            availableBalance: { increment: taskRewardToAdd },
+            totalEarned: { increment: taskRewardToAdd }
+          }
         });
-        if (taskRewardToAdd > 0) {
-          await tx.walletTransaction.create({
-            data: {
-              userId: user.id,
-              transactionType: "TASK_REWARD",
-              amount: taskRewardToAdd,
-              currency: "PKR",
-              status: "COMPLETED",
-              relatedEntityId: task.id,
-              actorId: admin.id,
-              actorName: admin.username,
-              reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
-              notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet2.availableBalance.toLocaleString()}`
-            }
-          });
-        }
+        await tx.walletTransaction.create({
+          data: {
+            userId: user.id,
+            transactionType: "TASK_REWARD",
+            amount: taskRewardToAdd,
+            currency: "PKR",
+            status: "COMPLETED",
+            relatedEntityId: task.id,
+            actorId: admin.id,
+            actorName: admin.username,
+            reason: `Task #${task.taskNumber} (${task.title}) Reward Credited`,
+            notes: `Task reward of PKR ${taskRewardToAdd.toLocaleString()} credited upon admin approval. Account balance updated to PKR ${updatedWallet2.availableBalance.toLocaleString()}`
+          }
+        });
       }
-      const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance &` : "";
+      const rewardNotice = taskRewardToAdd > 0 ? ` + PKR ${taskRewardToAdd.toLocaleString()} Balance` : "";
       await tx.notification.create({
         data: {
           userId: user.id,
-          title: `Task Approved!${rewardNotice} +${creditPointsToAdd} Points \u{1F389}`,
-          message: `Your task "${task.title}" was approved by administrator ${admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} You earned +${creditPointsToAdd} credit points! The next sequential task is now unlocked.`,
+          title: `Task Approved!${rewardNotice} \u{1F389}`,
+          message: `Your task "${task.title}" was approved by administrator ${admin.username}.${taskRewardToAdd > 0 ? ` PKR ${taskRewardToAdd.toLocaleString()} has been directly credited to your account balance!` : ""} The next sequential task is now unlocked.`,
           notificationType: "TASK_STATUS"
         }
       });
@@ -77788,7 +77762,6 @@ async function executeReviewSubmissionCore(params) {
       newState: {
         status: "APPROVED",
         rewardAmount: task.rewardAmount,
-        creditPoints: creditPointsToAdd,
         newBalance: updatedWallet.availableBalance
       },
       reason: reviewNotes,
@@ -77796,8 +77769,7 @@ async function executeReviewSubmissionCore(params) {
     }).catch((e) => console.error("Admin audit log error:", e));
     sendUserLiveCommand(user.id, "wallet", {
       availableBalance: updatedWallet.availableBalance,
-      totalEarned: updatedWallet.totalEarned,
-      creditPoints: updatedWallet.creditPoints
+      totalEarned: updatedWallet.totalEarned
     });
     sendUserLiveCommand(user.id, "task", { submissionId, taskId: task.id, status: "APPROVED" });
     sendUserLiveCommand(user.id, "refresh", { type: "TASK_APPROVED" });
@@ -78764,8 +78736,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-MLdmWOlL.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-QVODRIP2.css">
+    <script type="module" crossorigin src="/assets/main-DHoFj3Ux.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-DS2PREl8.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>

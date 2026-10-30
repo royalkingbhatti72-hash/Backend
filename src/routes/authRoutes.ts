@@ -117,8 +117,8 @@ router.post('/register', async (req: Request, res: Response, next) => {
         WHERE "code" = $4 AND "status" = 'AVAILABLE'
       `, user.id, user.name, normalizedPhone, trimmedRefCode);
 
-      // Create wallet
-      await tx.wallet.create({
+      // Create wallet with 100 initial credit points on joining
+      const wallet = await tx.wallet.create({
         data: {
           userId: user.id,
           currency: 'PKR',
@@ -126,6 +126,7 @@ router.post('/register', async (req: Request, res: Response, next) => {
           pendingBalance: 0,
           totalEarned: 0,
           totalDeposited: 0,
+          creditPoints: 100,
         },
       });
 
@@ -142,7 +143,7 @@ router.post('/register', async (req: Request, res: Response, next) => {
         });
       }
 
-      return user;
+      return { ...user, wallet };
     });
 
     const token = jwt.sign({ userId: result.id }, config.jwtSecret, { expiresIn: '7d' });
@@ -156,6 +157,7 @@ router.post('/register', async (req: Request, res: Response, next) => {
         phone: result.phone,
         referralCode: result.referralCode,
         accountStatus: result.accountStatus,
+        wallet: result.wallet,
       },
     });
   } catch (err) {

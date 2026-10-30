@@ -92,7 +92,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
         status: lvl.status,
         requiredTaskCount: lvl.requiredTaskCount,
         completionReward: lvl.completionReward,
-        totalCreditPoints: (lvl as any).totalCreditPoints ?? 100,
+        totalCreditPoints: 0,
         approvedTaskCount: stats.approvedCount,
         isCompleted: stats.isCompleted,
         isUnlocked,

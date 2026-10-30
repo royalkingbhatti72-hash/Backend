@@ -199,9 +199,7 @@ export const taskProgressionService = {
           description: task.description,
           taskType: task.taskType || (isPrepaidTask ? 'Prepaid Task' : 'Task'),
           rewardAmount: task.rewardAmount,
-          creditPoints: isPrepaidTask
-            ? ((task as any).creditPoints && (task as any).creditPoints > 5 ? (task as any).creditPoints : 30)
-            : ((task as any).creditPoints && (task as any).creditPoints > 0 ? (task as any).creditPoints : 5),
+          creditPoints: 0,
           isPaid: Boolean(task.isPaid),
           unlockFee: task.unlockFee || 0,
           requiresAdminApproval: task.requiresAdminApproval,
@@ -315,9 +313,7 @@ export const taskProgressionService = {
         description: task.description, // Appearable! Real description
         taskType: task.taskType || (isPrepaidTask ? 'Prepaid Task' : 'Task'),
         rewardAmount: task.rewardAmount,
-        creditPoints: isPrepaidTask
-          ? ((task as any).creditPoints && (task as any).creditPoints > 5 ? (task as any).creditPoints : 30)
-          : ((task as any).creditPoints && (task as any).creditPoints > 0 ? (task as any).creditPoints : 5),
+        creditPoints: 0,
         isPaid: Boolean(task.isPaid),
         unlockFee: task.unlockFee || 0,
         requiresAdminApproval: task.requiresAdminApproval,

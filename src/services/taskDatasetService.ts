@@ -22,7 +22,7 @@ export async function syncDatasetTasksToDatabase(): Promise<void> {
       const title = lvlData.title;
       const requiredTaskCount = lvlData.total_tasks;
       const completionReward = lvlData.level_reward;
-      const totalCreditPoints = lvlData.total_credit_points;
+      const totalCreditPoints = 0;
 
       const level = await prisma.level.upsert({
         where: { levelNumber },
@@ -50,7 +50,7 @@ export async function syncDatasetTasksToDatabase(): Promise<void> {
         const taskNumber = t.task_id;
         const type = t.type;
         const commission = t.commission;
-        const creditPoints = t.credit_points;
+        const creditPoints = 0;
         const isPaid = t.is_prepaid;
         const unlockFee = t.prepaid_value || 0;
         const pureUrl = cleanUrl(t.url);
@@ -60,8 +60,8 @@ export async function syncDatasetTasksToDatabase(): Promise<void> {
           : `YouTube ${type}`;
 
         const description = isPaid
-          ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} and ${creditPoints} credit points upon completion.`
-          : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission} and ${creditPoints} credit points.`;
+          ? `Prepaid task requiring deposit unlock fee of PKR ${unlockFee.toLocaleString()}. Yields commission of PKR ${commission.toLocaleString()} upon completion.`
+          : `Complete the ${type} action on YouTube. Watch, engage, and submit confirmation proof for admin verification to earn PKR ${commission}.`;
 
         const instructions = isPaid
           ? `1. Ensure wallet has sufficient balance or deposit PKR ${unlockFee.toLocaleString()}.\n2. Click Unlock Task to pay fee.\n3. Open protected link: ${pureUrl}\n4. Complete engagement steps.\n5. Submit transaction and proof screenshot for admin approval.`
