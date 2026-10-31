@@ -2179,8 +2179,8 @@ router.get('/referral-codes', requireAdmin, async (req: AdminAuthRequest, res: R
 
 router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
-    const { count = 10, prefix = 'ROYAL-VIP' } = req.body;
-    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100), prefix);
+    const { count = 10 } = req.body;
+    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100));
 
     await logAdminAction({
       adminId: req.admin!.id,
@@ -2189,12 +2189,12 @@ router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthReque
       entityType: 'AdminReferralCode',
       entityId: `batch_${Date.now()}`,
       newState: { count: generated.length, generated },
-      reason: `Generated ${generated.length} official invitation referral codes`,
+      reason: `Generated ${generated.length} official 6-letter invitation referral codes`,
       ipAddress: req.ip,
     });
 
     const data = await getAdminReferralCodesOverview();
-    res.json({ message: `Successfully generated ${generated.length} new referral codes!`, ...data });
+    res.json({ message: `Successfully generated ${generated.length} new 6-letter referral codes!`, ...data });
   } catch (err) {
     next(err);
   }
@@ -2203,18 +2203,18 @@ router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthReque
 router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { code, notes } = z.object({
-      code: z.string().min(3).max(30),
+      code: z.string().regex(/^[a-zA-Z]{6}$/, 'Referral code must be exactly 6 alphabetical letters (e.g. lbhyfr)'),
       notes: z.string().optional(),
     }).parse(req.body);
 
-    const formattedCode = code.trim().toUpperCase();
+    const formattedCode = code.trim().toLowerCase();
     await ensureAdminReferralCodes();
 
     await prisma.$executeRawUnsafe(`
       INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
       VALUES ($1, $2, 'AVAILABLE', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT ("code") DO NOTHING;
-    `, `arc_custom_${Date.now()}`, formattedCode, notes || 'Custom Admin Code');
+    `, `arc_custom_${Date.now()}`, formattedCode, notes || 'Custom 6-Letter Admin Code');
 
     await logAdminAction({
       adminId: req.admin!.id,
@@ -2223,7 +2223,7 @@ router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest
       entityType: 'AdminReferralCode',
       entityId: formattedCode,
       newState: { code: formattedCode },
-      reason: notes || 'Admin added custom invitation code',
+      reason: notes || 'Admin added custom 6-letter invitation code',
       ipAddress: req.ip,
     });
 

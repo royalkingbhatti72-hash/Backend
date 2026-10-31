@@ -64865,49 +64865,91 @@ async function requireAuth(req, res, next) {
 
 // src/services/adminReferralService.ts
 var tableEnsured = false;
-async function ensureAdminReferralCodes() {
-  if (tableEnsured) return;
+function generateSixLetterCode() {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  }
+  return code;
+}
+async function replenishAvailableCodesTo100() {
   try {
     await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "AdminReferralCode" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "code" TEXT NOT NULL UNIQUE,
-        "status" TEXT NOT NULL DEFAULT 'AVAILABLE',
-        "usedById" TEXT,
-        "usedByName" TEXT,
-        "usedByPhone" TEXT,
-        "usedAt" TIMESTAMP(3),
-        "notes" TEXT,
-        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
+      DELETE FROM "AdminReferralCode"
+      WHERE "status" = 'AVAILABLE' AND "code" !~ '^[a-zA-Z]{6}$'
     `);
     await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "AdminReferralCode_status_idx" ON "AdminReferralCode"("status")
+      UPDATE "AdminReferralCode"
+      SET "code" = LOWER("code")
+      WHERE "status" = 'AVAILABLE' AND "code" ~ '^[a-zA-Z]{6}$' AND "code" != LOWER("code")
     `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "AdminReferralCode_code_idx" ON "AdminReferralCode"("code")
+    const countRes = await prisma.$queryRawUnsafe(`
+      SELECT COUNT(*)::int AS count FROM "AdminReferralCode" WHERE "status" = 'AVAILABLE'
     `);
-    const result = await prisma.$queryRawUnsafe(`
-      SELECT COUNT(*)::int as count FROM "AdminReferralCode"
+    const currentAvailable = Number(countRes[0]?.count || 0);
+    const needed = 100 - currentAvailable;
+    if (needed <= 0) return;
+    const existingRows = await prisma.$queryRawUnsafe(`
+      SELECT LOWER("code") AS code FROM "AdminReferralCode"
     `);
-    const count = Number(result[0]?.count || 0);
-    if (count < 100) {
-      for (let i = 1; i <= 100; i++) {
-        const codeNum = String(i).padStart(3, "0");
-        const code = `ROYAL-VIP-${codeNum}`;
-        const id = `arc_vip_${codeNum}`;
-        await prisma.$executeRawUnsafe(`
-          INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
-          VALUES ($1, $2, 'AVAILABLE', 'Initial Official Admin Invitation Pool', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-          ON CONFLICT ("code") DO NOTHING;
-        `, id, code);
+    const existingSet = new Set(existingRows.map((r) => String(r.code).toLowerCase()));
+    const newCodes = [];
+    let attempts = 0;
+    while (newCodes.length < needed && attempts < needed * 20) {
+      attempts++;
+      const candidate = generateSixLetterCode();
+      if (!existingSet.has(candidate)) {
+        existingSet.add(candidate);
+        newCodes.push({
+          id: `arc_${Date.now()}_${Math.random().toString(36).substring(2, 8)}_${newCodes.length}`,
+          code: candidate
+        });
       }
     }
-    tableEnsured = true;
+    if (newCodes.length > 0) {
+      const valuesSql = newCodes.map(
+        (item) => `('${item.id}', '${item.code}', 'AVAILABLE', 'Official 6-Letter Admin Referral Code', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+      ).join(",\n");
+      await prisma.$executeRawUnsafe(`
+        INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+        VALUES ${valuesSql}
+        ON CONFLICT ("code") DO NOTHING;
+      `);
+    }
   } catch (err) {
-    console.error("Error ensuring AdminReferralCode table:", err);
+    console.error("Error replenishing admin referral codes to 100:", err);
   }
+}
+async function ensureAdminReferralCodes() {
+  if (!tableEnsured) {
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "AdminReferralCode" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "code" TEXT NOT NULL UNIQUE,
+          "status" TEXT NOT NULL DEFAULT 'AVAILABLE',
+          "usedById" TEXT,
+          "usedByName" TEXT,
+          "usedByPhone" TEXT,
+          "usedAt" TIMESTAMP(3),
+          "notes" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "AdminReferralCode_status_idx" ON "AdminReferralCode"("status")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "AdminReferralCode_code_idx" ON "AdminReferralCode"("code")
+      `);
+      tableEnsured = true;
+    } catch (err) {
+      console.error("Error ensuring AdminReferralCode table:", err);
+    }
+  }
+  await replenishAvailableCodesTo100();
 }
 async function getAdminReferralCodesOverview() {
   await ensureAdminReferralCodes();
@@ -64916,7 +64958,7 @@ async function getAdminReferralCodesOverview() {
       SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
       FROM "AdminReferralCode"
       WHERE "status" = 'AVAILABLE'
-      ORDER BY "code" ASC
+      ORDER BY "createdAt" DESC, "code" ASC
     `),
     prisma.$queryRawUnsafe(`
       SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
@@ -64937,39 +64979,43 @@ async function getAdminReferralCodesOverview() {
 }
 async function validateAdminReferralCode(rawCode) {
   await ensureAdminReferralCodes();
-  const code = (rawCode || "").trim().toUpperCase();
+  const code = (rawCode || "").trim().toLowerCase();
   if (!code) return false;
-  const result = await prisma.$queryRawUnsafe(`
+  const result = await prisma.$queryRawUnsafe(
+    `
     SELECT "id" FROM "AdminReferralCode"
-    WHERE "code" = $1 AND "status" = 'AVAILABLE'
+    WHERE LOWER("code") = $1 AND "status" = 'AVAILABLE'
     LIMIT 1
-  `, code);
+  `,
+    code
+  );
   return result.length > 0;
 }
-async function generateAdditionalCodes(count = 10, prefix = "ROYAL-VIP") {
+async function generateAdditionalCodes(count = 10) {
   await ensureAdminReferralCodes();
   const generated = [];
-  const maxResult = await prisma.$queryRawUnsafe(`
-    SELECT "code" FROM "AdminReferralCode"
-    WHERE "code" LIKE $1
-    ORDER BY "code" DESC
-    LIMIT 1
-  `, `${prefix}-%`);
-  let nextIndex = 101;
-  if (maxResult.length > 0) {
-    const lastNum = parseInt(maxResult[0].code.replace(`${prefix}-`, ""), 10);
-    if (!isNaN(lastNum)) nextIndex = lastNum + 1;
-  }
-  for (let i = 0; i < count; i++) {
-    const codeNum = String(nextIndex + i).padStart(3, "0");
-    const code = `${prefix}-${codeNum}`;
-    const id = `arc_gen_${Date.now()}_${i}`;
-    await prisma.$executeRawUnsafe(`
-      INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
-      VALUES ($1, $2, 'AVAILABLE', 'Admin Generated Batch', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      ON CONFLICT ("code") DO NOTHING;
-    `, id, code);
-    generated.push(code);
+  const existingRows = await prisma.$queryRawUnsafe(`
+    SELECT LOWER("code") AS code FROM "AdminReferralCode"
+  `);
+  const existingSet = new Set(existingRows.map((r) => String(r.code).toLowerCase()));
+  let attempts = 0;
+  while (generated.length < count && attempts < count * 20) {
+    attempts++;
+    const code = generateSixLetterCode();
+    if (!existingSet.has(code)) {
+      existingSet.add(code);
+      const id = `arc_gen_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${generated.length}`;
+      await prisma.$executeRawUnsafe(
+        `
+        INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
+        VALUES ($1, $2, 'AVAILABLE', 'Official 6-Letter Admin Referral Code', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ("code") DO NOTHING;
+      `,
+        id,
+        code
+      );
+      generated.push(code);
+    }
   }
   return generated;
 }
@@ -64999,7 +65045,7 @@ function normalizePhone(phone) {
   return phone.replace(/[^0-9+]/g, "");
 }
 router.get("/validate-referral/:code", async (req, res) => {
-  const code = (req.params.code || "").trim().toUpperCase();
+  const code = (req.params.code || "").trim().toLowerCase();
   const isValid = await validateAdminReferralCode(code);
   res.json({ valid: isValid, code });
 });
@@ -65007,7 +65053,7 @@ router.post("/register", async (req, res, next) => {
   try {
     const validated = registerSchema.parse(req.body);
     const normalizedPhone = normalizePhone(validated.phone);
-    const trimmedRefCode = (validated.referralCode || "").trim().toUpperCase();
+    const trimmedRefCode = (validated.referralCode || "").trim().toLowerCase();
     if (!trimmedRefCode) {
       return res.status(400).json({
         error: "An official invitation code is required to register. Client self-invites are disabled; codes are provided exclusively by administration."
@@ -65053,7 +65099,7 @@ router.post("/register", async (req, res, next) => {
             "usedByPhone" = $3,
             "usedAt" = CURRENT_TIMESTAMP,
             "updatedAt" = CURRENT_TIMESTAMP
-        WHERE "code" = $4 AND "status" = 'AVAILABLE'
+        WHERE LOWER("code") = LOWER($4) AND "status" = 'AVAILABLE'
       `, user.id, user.name, normalizedPhone, trimmedRefCode);
       const wallet = await tx.wallet.create({
         data: {
@@ -65093,6 +65139,7 @@ router.post("/register", async (req, res, next) => {
       }
       return { ...user, wallet };
     });
+    await replenishAvailableCodesTo100();
     const token = import_jsonwebtoken2.default.sign({ userId: result.id }, config2.jwtSecret, { expiresIn: "7d" });
     res.status(201).json({
       message: "Registration successful! Welcome to Earn Street.",
@@ -78460,8 +78507,8 @@ router11.get("/referral-codes", requireAdmin, async (req, res, next) => {
 });
 router11.post("/referral-codes/generate", requireAdmin, async (req, res, next) => {
   try {
-    const { count = 10, prefix = "ROYAL-VIP" } = req.body;
-    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100), prefix);
+    const { count = 10 } = req.body;
+    const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100));
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -78469,11 +78516,11 @@ router11.post("/referral-codes/generate", requireAdmin, async (req, res, next) =
       entityType: "AdminReferralCode",
       entityId: `batch_${Date.now()}`,
       newState: { count: generated.length, generated },
-      reason: `Generated ${generated.length} official invitation referral codes`,
+      reason: `Generated ${generated.length} official 6-letter invitation referral codes`,
       ipAddress: req.ip
     });
     const data = await getAdminReferralCodesOverview();
-    res.json({ message: `Successfully generated ${generated.length} new referral codes!`, ...data });
+    res.json({ message: `Successfully generated ${generated.length} new 6-letter referral codes!`, ...data });
   } catch (err) {
     next(err);
   }
@@ -78481,16 +78528,16 @@ router11.post("/referral-codes/generate", requireAdmin, async (req, res, next) =
 router11.post("/referral-codes/create", requireAdmin, async (req, res, next) => {
   try {
     const { code, notes } = external_exports.object({
-      code: external_exports.string().min(3).max(30),
+      code: external_exports.string().regex(/^[a-zA-Z]{6}$/, "Referral code must be exactly 6 alphabetical letters (e.g. lbhyfr)"),
       notes: external_exports.string().optional()
     }).parse(req.body);
-    const formattedCode = code.trim().toUpperCase();
+    const formattedCode = code.trim().toLowerCase();
     await ensureAdminReferralCodes();
     await prisma.$executeRawUnsafe(`
       INSERT INTO "AdminReferralCode" ("id", "code", "status", "notes", "createdAt", "updatedAt")
       VALUES ($1, $2, 'AVAILABLE', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT ("code") DO NOTHING;
-    `, `arc_custom_${Date.now()}`, formattedCode, notes || "Custom Admin Code");
+    `, `arc_custom_${Date.now()}`, formattedCode, notes || "Custom 6-Letter Admin Code");
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -78498,7 +78545,7 @@ router11.post("/referral-codes/create", requireAdmin, async (req, res, next) => 
       entityType: "AdminReferralCode",
       entityId: formattedCode,
       newState: { code: formattedCode },
-      reason: notes || "Admin added custom invitation code",
+      reason: notes || "Admin added custom 6-letter invitation code",
       ipAddress: req.ip
     });
     const data = await getAdminReferralCodesOverview();
