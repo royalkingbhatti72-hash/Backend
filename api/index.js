@@ -21351,27 +21351,27 @@ var require_router = __commonJS({
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var methods = METHODS.map((method) => method.toLowerCase());
-    module.exports = Router12;
+    module.exports = Router13;
     module.exports.Route = Route;
-    function Router12(options) {
-      if (!(this instanceof Router12)) {
-        return new Router12(options);
+    function Router13(options) {
+      if (!(this instanceof Router13)) {
+        return new Router13(options);
       }
       const opts = options || {};
-      function router12(req, res, next) {
-        router12.handle(req, res, next);
+      function router13(req, res, next) {
+        router13.handle(req, res, next);
       }
-      Object.setPrototypeOf(router12, this);
-      router12.caseSensitive = opts.caseSensitive;
-      router12.mergeParams = opts.mergeParams;
-      router12.params = {};
-      router12.strict = opts.strict;
-      router12.stack = [];
-      return router12;
+      Object.setPrototypeOf(router13, this);
+      router13.caseSensitive = opts.caseSensitive;
+      router13.mergeParams = opts.mergeParams;
+      router13.params = {};
+      router13.strict = opts.strict;
+      router13.stack = [];
+      return router13;
     }
-    Router12.prototype = function() {
+    Router13.prototype = function() {
     };
-    Router12.prototype.param = function param(name, fn) {
+    Router13.prototype.param = function param(name, fn) {
       if (!name) {
         throw new TypeError("argument name is required");
       }
@@ -21391,7 +21391,7 @@ var require_router = __commonJS({
       params.push(fn);
       return this;
     };
-    Router12.prototype.handle = function handle(req, res, callback) {
+    Router13.prototype.handle = function handle(req, res, callback) {
       if (!callback) {
         throw new TypeError("argument callback is required");
       }
@@ -21518,7 +21518,7 @@ var require_router = __commonJS({
         }
       }
     };
-    Router12.prototype.use = function use(handler) {
+    Router13.prototype.use = function use(handler) {
       let offset = 0;
       let path6 = "/";
       if (typeof handler !== "function") {
@@ -21551,7 +21551,7 @@ var require_router = __commonJS({
       }
       return this;
     };
-    Router12.prototype.route = function route(path6) {
+    Router13.prototype.route = function route(path6) {
       const route2 = new Route(path6);
       const layer = new Layer(path6, {
         sensitive: this.caseSensitive,
@@ -21566,7 +21566,7 @@ var require_router = __commonJS({
       return route2;
     };
     methods.concat("all").forEach(function(method) {
-      Router12.prototype[method] = function(path6) {
+      Router13.prototype[method] = function(path6) {
         const route = this.route(path6);
         route[method].apply(route, slice.call(arguments, 1));
         return this;
@@ -21749,13 +21749,13 @@ var require_application = __commonJS({
     var compileTrust = require_utils3().compileTrust;
     var resolve = __require("node:path").resolve;
     var once = require_once();
-    var Router12 = require_router();
+    var Router13 = require_router();
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var app2 = exports = module.exports = {};
     var trustProxyDefaultSymbol = "@@symbol:trust_proxy_default";
     app2.init = function init() {
-      var router12 = null;
+      var router13 = null;
       this.cache = /* @__PURE__ */ Object.create(null);
       this.engines = /* @__PURE__ */ Object.create(null);
       this.settings = /* @__PURE__ */ Object.create(null);
@@ -21764,13 +21764,13 @@ var require_application = __commonJS({
         configurable: true,
         enumerable: true,
         get: function getrouter() {
-          if (router12 === null) {
-            router12 = new Router12({
+          if (router13 === null) {
+            router13 = new Router13({
               caseSensitive: this.enabled("case sensitive routing"),
               strict: this.enabled("strict routing")
             });
           }
-          return router12;
+          return router13;
         }
       });
     };
@@ -21841,15 +21841,15 @@ var require_application = __commonJS({
       if (fns.length === 0) {
         throw new TypeError("app.use() requires a middleware function");
       }
-      var router12 = this.router;
+      var router13 = this.router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router12.use(path6, fn2);
+          return router13.use(path6, fn2);
         }
         debug(".use app under %s", path6);
         fn2.mountpath = path6;
         fn2.parent = this;
-        router12.use(path6, function mounted_app(req, res, next) {
+        router13.use(path6, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             Object.setPrototypeOf(req, orig.request);
@@ -24438,7 +24438,7 @@ var require_express = __commonJS({
     var EventEmitter = __require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
-    var Router12 = require_router();
+    var Router13 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -24460,8 +24460,8 @@ var require_express = __commonJS({
     exports.application = proto;
     exports.request = req;
     exports.response = res;
-    exports.Route = Router12.Route;
-    exports.Router = Router12;
+    exports.Route = Router13.Route;
+    exports.Router = Router13;
     exports.json = bodyParser.json;
     exports.raw = bodyParser.raw;
     exports.static = require_serve_static();
@@ -43325,7 +43325,7 @@ import path5 from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 
 // src/app.ts
-var import_express12 = __toESM(require_express2(), 1);
+var import_express13 = __toESM(require_express2(), 1);
 var import_cors = __toESM(require_lib3(), 1);
 var import_morgan = __toESM(require_morgan(), 1);
 import path4 from "path";
@@ -64863,6 +64863,219 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// src/services/telegramService.ts
+var TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "9207587440:AAHXQL1Krzbj8zRMqFXJypFiH-N_ePPghgk";
+var TELEGRAM_ACCESS_PASSWORD = process.env.TELEGRAM_ACCESS_PASSWORD || "9989GHYRT89";
+var TG_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+async function sendTelegramMessage(chatId, text, keyboard) {
+  try {
+    const payload = {
+      chat_id: chatId,
+      text,
+      parse_mode: "Markdown"
+    };
+    if (keyboard) {
+      payload.reply_markup = keyboard;
+    }
+    const res = await fetch(`${TG_API_BASE}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`Telegram sendMessage failed [${res.status}]:`, errText);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Error sending Telegram message:", err);
+    return false;
+  }
+}
+async function setTelegramWebhook(webhookUrl) {
+  try {
+    const res = await fetch(`${TG_API_BASE}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: webhookUrl,
+        drop_pending_updates: false,
+        allowed_updates: ["message"]
+      })
+    });
+    return await res.json();
+  } catch (err) {
+    console.error("Error setting Telegram webhook:", err);
+    return { ok: false, error: err.message };
+  }
+}
+async function getTelegramWebhookInfo() {
+  try {
+    const res = await fetch(`${TG_API_BASE}/getWebhookInfo`);
+    return await res.json();
+  } catch (err) {
+    console.error("Error getting Telegram webhook info:", err);
+    return { ok: false, error: err.message };
+  }
+}
+async function isChatAuthenticated(chatId) {
+  try {
+    const setting = await prisma.siteSetting.findUnique({
+      where: { key: "TELEGRAM_AUTHORIZED_CHATS" }
+    });
+    if (!setting || !setting.value) return false;
+    const list = JSON.parse(setting.value);
+    return list.some((u) => String(u.chatId) === String(chatId));
+  } catch {
+    return false;
+  }
+}
+async function authorizeChat(chatId, userMeta) {
+  try {
+    const setting = await prisma.siteSetting.findUnique({
+      where: { key: "TELEGRAM_AUTHORIZED_CHATS" }
+    });
+    let list = [];
+    if (setting && setting.value) {
+      try {
+        list = JSON.parse(setting.value);
+      } catch {
+        list = [];
+      }
+    }
+    const existingIndex = list.findIndex((u) => String(u.chatId) === String(chatId));
+    const record2 = {
+      chatId,
+      username: userMeta?.username,
+      firstName: userMeta?.firstName,
+      authAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    if (existingIndex >= 0) {
+      list[existingIndex] = record2;
+    } else {
+      list.push(record2);
+    }
+    await prisma.siteSetting.upsert({
+      where: { key: "TELEGRAM_AUTHORIZED_CHATS" },
+      create: {
+        key: "TELEGRAM_AUTHORIZED_CHATS",
+        value: JSON.stringify(list),
+        category: "REFERRAL",
+        description: "Authorized Telegram client chat IDs for invitation code generation"
+      },
+      update: {
+        value: JSON.stringify(list)
+      }
+    });
+  } catch (err) {
+    console.error("Error authorizing Telegram chat:", err);
+  }
+}
+async function assignCodeForTelegramChat(chatId, userMeta) {
+  const available = await prisma.$queryRawUnsafe(`
+    SELECT "id", "code"
+    FROM "AdminReferralCode"
+    WHERE "status" = 'AVAILABLE'
+    ORDER BY RANDOM()
+    LIMIT 1
+  `);
+  let codeId;
+  let code;
+  if (available.length > 0) {
+    codeId = available[0].id;
+    code = available[0].code;
+  } else {
+    const generated = await generateAdditionalCodes(10);
+    code = generated[0];
+    const row = await prisma.$queryRawUnsafe(
+      `SELECT "id" FROM "AdminReferralCode" WHERE "code" = $1 LIMIT 1`,
+      code
+    );
+    codeId = row[0]?.id || `arc_tg_${Date.now()}`;
+  }
+  const tag = `TG:${chatId}|${userMeta?.username || userMeta?.firstName || "Client"}`;
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AdminReferralCode" SET "notes" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
+    tag,
+    codeId
+  );
+  return code;
+}
+async function handleTelegramUpdate(update) {
+  const message = update?.message;
+  if (!message || !message.text) return;
+  const chatId = message.chat.id;
+  const rawText = message.text.trim();
+  const lowerText = rawText.toLowerCase();
+  const firstName = message.from?.first_name || "Friend";
+  const username = message.from?.username;
+  const isAuth = await isChatAuthenticated(chatId);
+  const authKeyboard = {
+    keyboard: [[{ text: "code" }]],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  };
+  if (rawText === TELEGRAM_ACCESS_PASSWORD) {
+    await authorizeChat(chatId, { username, firstName });
+    await sendTelegramMessage(
+      chatId,
+      `\u2705 *Access Granted, ${firstName}!*
+
+You are now authenticated to generate official invitation codes for new user signups.
+
+\u{1F449} Send *code* anytime or tap the button below to get an invitation code.`,
+      authKeyboard
+    );
+    return;
+  }
+  if (!isAuth) {
+    await sendTelegramMessage(
+      chatId,
+      `\u{1F44B} *Welcome, ${firstName}!*
+
+Welcome to the *Official Invitation Code Bot*.
+
+\u{1F512} Please send the *password* to unlock invitation code generation:`
+    );
+    return;
+  }
+  if (lowerText === "code" || lowerText === "/code" || lowerText === "get code") {
+    const code = await assignCodeForTelegramChat(chatId, { username, firstName });
+    await sendTelegramMessage(
+      chatId,
+      `\u{1F39F}\uFE0F *Your Invitation Code:*
+
+\`${code}\`
+
+\u{1F4CB} _(Tap code above to copy)_
+
+Give this 6-letter code to your user to create their account.
+
+\u{1F514} *You will receive an instant message here the moment this code is used to register!*`,
+      authKeyboard
+    );
+    return;
+  }
+  if (lowerText === "/start" || lowerText === "help" || lowerText === "/help") {
+    await sendTelegramMessage(
+      chatId,
+      `\u{1F44B} *Welcome Back, ${firstName}!*
+
+Your access is active.
+
+\u{1F449} Send *code* to generate a random invitation code.`,
+      authKeyboard
+    );
+    return;
+  }
+  await sendTelegramMessage(
+    chatId,
+    `Send *code* to receive a random invitation code.`,
+    authKeyboard
+  );
+}
+
 // src/services/adminReferralService.ts
 var tableEnsured = false;
 function generateSixLetterCode() {
@@ -64873,7 +65086,7 @@ function generateSixLetterCode() {
   }
   return code;
 }
-async function replenishAvailableCodesTo100() {
+async function replenishAvailableCodesTo1002() {
   try {
     await prisma.$executeRawUnsafe(`
       DELETE FROM "AdminReferralCode"
@@ -64949,7 +65162,7 @@ async function ensureAdminReferralCodes() {
       console.error("Error ensuring AdminReferralCode table:", err);
     }
   }
-  await replenishAvailableCodesTo100();
+  await replenishAvailableCodesTo1002();
 }
 async function getAdminReferralCodesOverview() {
   await ensureAdminReferralCodes();
@@ -65139,7 +65352,7 @@ router.post("/register", async (req, res, next) => {
       }
       return { ...user, wallet };
     });
-    await replenishAvailableCodesTo100();
+    await replenishAvailableCodesTo1002();
     const token = import_jsonwebtoken2.default.sign({ userId: result.id }, config2.jwtSecret, { expiresIn: "7d" });
     res.status(201).json({
       message: "Registration successful! Welcome to Earn Street.",
@@ -78600,6 +78813,55 @@ router11.post("/referral-codes/create", requireAdmin, async (req, res, next) => 
 });
 var adminRoutes_default = router11;
 
+// src/routes/telegramRoutes.ts
+var import_express12 = __toESM(require_express2(), 1);
+var router12 = (0, import_express12.Router)();
+router12.post("/webhook", async (req, res) => {
+  try {
+    const update = req.body;
+    res.status(200).json({ ok: true });
+    if (update) {
+      await handleTelegramUpdate(update).catch((err) => {
+        console.error("Error handling Telegram update in webhook:", err);
+      });
+    }
+  } catch (err) {
+    console.error("Webhook error:", err);
+    if (!res.headersSent) {
+      res.status(200).json({ ok: false });
+    }
+  }
+});
+router12.get("/setup", async (req, res) => {
+  try {
+    const host = req.get("host") || "streetearn-backend.vercel.app";
+    const protocol = req.protocol === "http" && !host.includes("vercel.app") ? "http" : "https";
+    const webhookUrl = `${protocol}://${host}/api/telegram/webhook`;
+    const result = await setTelegramWebhook(webhookUrl);
+    res.json({
+      success: result.ok,
+      webhookUrl,
+      telegramResponse: result,
+      info: "Telegram Bot is configured to send updates to this webhook URL."
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router12.get("/info", async (req, res) => {
+  try {
+    const webhookInfo = await getTelegramWebhookInfo();
+    res.json({
+      botTokenConfigured: Boolean(TELEGRAM_BOT_TOKEN),
+      passwordConfigured: Boolean(TELEGRAM_ACCESS_PASSWORD),
+      webhookInfo
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+var telegramRoutes_default = router12;
+
 // src/middleware/errorHandler.ts
 function errorHandler(err, req, res, next) {
   console.error(`[Error] ${req.method} ${req.url}:`, err);
@@ -78666,7 +78928,7 @@ function getAdminSpaHtml() {
 var __filename3 = fileURLToPath3(import.meta.url);
 var __dirname3 = path4.dirname(__filename3);
 function createApp() {
-  const app2 = (0, import_express12.default)();
+  const app2 = (0, import_express13.default)();
   app2.use((req, res, next) => {
     const origin = req.headers.origin || "*";
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -78687,8 +78949,8 @@ function createApp() {
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "X-Api-Key"]
   }));
-  app2.use(import_express12.default.json());
-  app2.use(import_express12.default.urlencoded({ extended: true }));
+  app2.use(import_express13.default.json());
+  app2.use(import_express13.default.urlencoded({ extended: true }));
   if (process.env.NODE_ENV !== "test") {
     app2.use((0, import_morgan.default)("dev"));
   }
@@ -78734,7 +78996,7 @@ function createApp() {
   };
   app2.use(async (req, res, next) => {
     const reqPath = req.path || "";
-    if (reqPath.startsWith("/api/admin") || reqPath.startsWith("/adminpanal") || reqPath.startsWith("/api/settings") || reqPath === "/api/health" || reqPath === "/api" || reqPath === "/api/index" || reqPath.startsWith("/assets") || reqPath.startsWith("/images") || reqPath === "/favicon.ico") {
+    if (reqPath.startsWith("/api/admin") || reqPath.startsWith("/adminpanal") || reqPath.startsWith("/api/settings") || reqPath.startsWith("/api/telegram") || reqPath === "/api/health" || reqPath === "/api" || reqPath === "/api/index" || reqPath.startsWith("/assets") || reqPath.startsWith("/images") || reqPath === "/favicon.ico") {
       return next();
     }
     if (reqPath.startsWith("/api/")) {
@@ -78762,6 +79024,7 @@ function createApp() {
   app2.use("/api/notifications", notificationRoutes_default);
   app2.use("/api/settings", settingsRoutes_default);
   app2.use("/api/admin", adminRoutes_default);
+  app2.use("/api/telegram", telegramRoutes_default);
   app2.get(["/api", "/api/index"], (req, res) => {
     res.json({
       name: "Earn Street API Server",
@@ -78780,12 +79043,12 @@ function createApp() {
   const backendAssetsDir = path4.resolve(__dirname3, "../assets");
   const rootAssetsDir = path4.resolve(process.cwd(), "assets");
   const rootPublicAssetsDir = path4.resolve(process.cwd(), "public/assets");
-  app2.use("/assets", import_express12.default.static(path4.join(publicDir, "assets")));
-  app2.use("/assets", import_express12.default.static(backendAssetsDir));
-  app2.use("/assets", import_express12.default.static(rootPublicAssetsDir));
-  app2.use("/assets", import_express12.default.static(rootAssetsDir));
-  app2.use(import_express12.default.static(publicDir));
-  app2.use(import_express12.default.static(path4.resolve(process.cwd(), "public")));
+  app2.use("/assets", import_express13.default.static(path4.join(publicDir, "assets")));
+  app2.use("/assets", import_express13.default.static(backendAssetsDir));
+  app2.use("/assets", import_express13.default.static(rootPublicAssetsDir));
+  app2.use("/assets", import_express13.default.static(rootAssetsDir));
+  app2.use(import_express13.default.static(publicDir));
+  app2.use(import_express13.default.static(path4.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
       if (req.path.endsWith(".js") && !req.path.includes("main-r7sOXJyo.js")) {

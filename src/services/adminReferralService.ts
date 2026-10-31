@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { notifyTelegramCodeUsed } from './telegramService';
 
 export interface AdminReferralCodeRecord {
   id: string;
@@ -214,6 +215,12 @@ export async function claimAdminReferralCode(
   if (updateResult > 0) {
     // Automatically generate 1 new 6-letter code to replace the used code so pool stays at 100
     await replenishAvailableCodesTo100();
+
+    // Notify the Telegram client who requested this code
+    notifyTelegramCodeUsed(code, user).catch((err) => {
+      console.error('Error in notifyTelegramCodeUsed:', err);
+    });
+
     return true;
   }
 

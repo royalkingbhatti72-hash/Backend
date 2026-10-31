@@ -18,6 +18,7 @@ import referralRoutes from './routes/referralRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import adminRoutes from './routes/adminRoutes';
+import telegramRoutes from './routes/telegramRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
 import { prisma } from './prisma';
@@ -122,6 +123,7 @@ export function createApp() {
       reqPath.startsWith('/api/admin') ||
       reqPath.startsWith('/adminpanal') ||
       reqPath.startsWith('/api/settings') ||
+      reqPath.startsWith('/api/telegram') ||
       reqPath === '/api/health' ||
       reqPath === '/api' ||
       reqPath === '/api/index' ||
@@ -160,6 +162,7 @@ export function createApp() {
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/telegram', telegramRoutes);
 
   // Root & Health check endpoints
   app.get(['/api', '/api/index'], (req, res) => {
