@@ -65178,6 +65178,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
     const [
       levels,
       allApprovedProgress,
+      approvedSubmissions,
       taskRewardTransactions,
       referralCount,
       entitlement,
@@ -65198,6 +65199,17 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
               unlockFee: true,
               taskType: true,
               creditPoints: true
+            }
+          }
+        }
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId, status: "APPROVED" },
+        select: {
+          task: {
+            select: {
+              id: true,
+              levelId: true
             }
           }
         }
@@ -65223,10 +65235,21 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
         take: 5
       })
     ]);
-    const countByLevel = /* @__PURE__ */ new Map();
+    const approvedTasksByLevel = /* @__PURE__ */ new Map();
     for (const p of allApprovedProgress) {
-      if (p.task?.levelId) {
-        countByLevel.set(p.task.levelId, (countByLevel.get(p.task.levelId) || 0) + 1);
+      if (p.task?.levelId && p.task?.id) {
+        if (!approvedTasksByLevel.has(p.task.levelId)) {
+          approvedTasksByLevel.set(p.task.levelId, /* @__PURE__ */ new Set());
+        }
+        approvedTasksByLevel.get(p.task.levelId).add(p.task.id);
+      }
+    }
+    for (const s of approvedSubmissions) {
+      if (s.task?.levelId && s.task?.id) {
+        if (!approvedTasksByLevel.has(s.task.levelId)) {
+          approvedTasksByLevel.set(s.task.levelId, /* @__PURE__ */ new Set());
+        }
+        approvedTasksByLevel.get(s.task.levelId).add(s.task.id);
       }
     }
     let currentLevelNumber = 1;
@@ -65235,7 +65258,7 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
     let completedLevelsCount = 0;
     let foundActiveLevel = false;
     for (const lvl of levels) {
-      const approvedCount = countByLevel.get(lvl.id) || 0;
+      const approvedCount = approvedTasksByLevel.get(lvl.id)?.size || 0;
       if (approvedCount >= (lvl.requiredTaskCount || 10)) {
         completedLevelsCount++;
       } else if (!foundActiveLevel) {
@@ -65250,7 +65273,10 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
       isAllLevelsCompleted = true;
     }
     const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
-    const totalApprovedTasksCount = allApprovedProgress.length;
+    let totalApprovedTasksCount = 0;
+    for (const set2 of approvedTasksByLevel.values()) {
+      totalApprovedTasksCount += set2.size;
+    }
     const remainingTasksCount = Math.max(0, 100 - totalApprovedTasksCount);
     const totalTaskRewardsApproved = taskRewardTransactions._sum.amount || 0;
     const spinEligibility = {
@@ -65726,7 +65752,7 @@ var taskProgressionService = {
     if (!isLevelUnlocked) {
       const lockedTasks = level.tasks.map((task) => {
         const isPrepaidTask = Boolean(
-          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
+          task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")
         );
         return {
           id: task.id,
@@ -65809,7 +65835,7 @@ var taskProgressionService = {
       const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
       const isLocked = userStatus === "LOCKED";
       const isPrepaidTask = Boolean(
-        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskNumber === 5 || task.taskNumber === 10 || task.taskNumber === 15 || task.taskNumber === 20 || task.taskType?.toLowerCase().includes("prepaid")
+        task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")
       );
       evaluatedTasks.push({
         id: task.id,

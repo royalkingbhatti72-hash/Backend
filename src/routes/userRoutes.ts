@@ -30,6 +30,7 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
     const [
       levels,
       allApprovedProgress,
+      approvedSubmissions,
       taskRewardTransactions,
       referralCount,
       entitlement,
@@ -50,6 +51,17 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
               unlockFee: true,
               taskType: true,
               creditPoints: true,
+            },
+          },
+        },
+      }),
+      prisma.taskSubmission.findMany({
+        where: { userId, status: 'APPROVED' },
+        select: {
+          task: {
+            select: {
+              id: true,
+              levelId: true,
             },
           },
         },
@@ -76,11 +88,22 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
       }),
     ]);
 
-    // Aggregate progress counts in-memory in 0ms
-    const countByLevel = new Map<string, number>();
+    // Aggregate unique approved tasks per level
+    const approvedTasksByLevel = new Map<string, Set<string>>();
     for (const p of allApprovedProgress) {
-      if (p.task?.levelId) {
-        countByLevel.set(p.task.levelId, (countByLevel.get(p.task.levelId) || 0) + 1);
+      if (p.task?.levelId && p.task?.id) {
+        if (!approvedTasksByLevel.has(p.task.levelId)) {
+          approvedTasksByLevel.set(p.task.levelId, new Set());
+        }
+        approvedTasksByLevel.get(p.task.levelId)!.add(p.task.id);
+      }
+    }
+    for (const s of approvedSubmissions) {
+      if (s.task?.levelId && s.task?.id) {
+        if (!approvedTasksByLevel.has(s.task.levelId)) {
+          approvedTasksByLevel.set(s.task.levelId, new Set());
+        }
+        approvedTasksByLevel.get(s.task.levelId)!.add(s.task.id);
       }
     }
 
@@ -91,7 +114,7 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
     let foundActiveLevel = false;
 
     for (const lvl of levels) {
-      const approvedCount = countByLevel.get(lvl.id) || 0;
+      const approvedCount = approvedTasksByLevel.get(lvl.id)?.size || 0;
       if (approvedCount >= (lvl.requiredTaskCount || 10)) {
         completedLevelsCount++;
       } else if (!foundActiveLevel) {
@@ -108,7 +131,10 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
     }
 
     const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
-    const totalApprovedTasksCount = allApprovedProgress.length;
+    let totalApprovedTasksCount = 0;
+    for (const set of approvedTasksByLevel.values()) {
+      totalApprovedTasksCount += set.size;
+    }
     const remainingTasksCount = Math.max(0, 100 - totalApprovedTasksCount);
     const totalTaskRewardsApproved = taskRewardTransactions._sum.amount || 0;
 
