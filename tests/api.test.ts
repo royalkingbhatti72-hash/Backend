@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/prisma';
+import { getAdminReferralCodesOverview } from '../src/services/adminReferralService';
 
 const app = createApp();
 
@@ -20,20 +21,12 @@ describe('Royal Rewards Full-Stack API Suite', { timeout: 30000 }, () => {
     expect(adminRes.status).toBe(200);
     adminToken = adminRes.body.token;
 
-    // Find any existing user with a referral code or create one
-    let refUser = await prisma.user.findFirst();
-    if (!refUser) {
-      refUser = await prisma.user.create({
-        data: {
-          name: 'Root Referrer',
-          phone: '03000000000',
-          passwordHash: 'dummy',
-          referralCode: 'ROYAL777',
-        },
-      });
+    // Find an available admin referral code
+    const overview = await getAdminReferralCodesOverview();
+    if (overview.availableCodes.length > 0) {
+      validRefCode = overview.availableCodes[0].code;
     }
-    validRefCode = refUser.referralCode;
-  });
+  }, 30000);
 
   describe('1. Authentication and User Registration', () => {
     it('registers a new user successfully with wallet and Level 1 progress', async () => {

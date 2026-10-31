@@ -130,17 +130,33 @@ router.post('/register', async (req: Request, res: Response, next) => {
         },
       });
 
-      // Initialize Level 1 progress
-      const level1 = await tx.level.findUnique({ where: { levelNumber: 1 } });
-      if (level1) {
-        await tx.userLevelProgress.create({
-          data: {
+      // Initialize 10-level and 100-task progression for new user
+      const allLevels = await tx.level.findMany({
+        orderBy: { levelNumber: 'asc' },
+        include: { tasks: { orderBy: { taskNumber: 'asc' } } },
+      });
+
+      if (allLevels.length > 0) {
+        await tx.userLevelProgress.createMany({
+          data: allLevels.map((lvl) => ({
             userId: user.id,
-            levelId: level1.id,
-            completionStatus: 'IN_PROGRESS',
+            levelId: lvl.id,
+            completionStatus: lvl.levelNumber === 1 ? 'IN_PROGRESS' : 'LOCKED',
             approvedTaskCount: 0,
-          },
+          })),
         });
+
+        const allTasks = allLevels.flatMap((lvl) => lvl.tasks);
+        if (allTasks.length > 0) {
+          await tx.userTaskProgress.createMany({
+            data: allTasks.map((t) => ({
+              userId: user.id,
+              taskId: t.id,
+              status: t.levelId === allLevels[0]?.id && t.taskNumber === 1 ? 'AVAILABLE' : 'LOCKED',
+              isPaidUnlocked: false,
+            })),
+          });
+        }
       }
 
       return { ...user, wallet };
