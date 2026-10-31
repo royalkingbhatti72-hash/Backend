@@ -65986,43 +65986,6 @@ var taskProgressionService = {
         completedAt: isCompleted ? /* @__PURE__ */ new Date() : null
       }
     });
-    if (isCompleted && level.completionReward > 0) {
-      const rewardKey = `LEVEL_REWARD_${level.id}_${userId}`;
-      const existing = await prisma.walletTransaction.findUnique({
-        where: { idempotencyKey: rewardKey }
-      });
-      if (!existing) {
-        await prisma.$transaction(async (tx) => {
-          await tx.wallet.update({
-            where: { userId },
-            data: {
-              availableBalance: { increment: level.completionReward },
-              totalEarned: { increment: level.completionReward }
-            }
-          });
-          await tx.walletTransaction.create({
-            data: {
-              userId,
-              transactionType: "LEVEL_REWARD",
-              amount: level.completionReward,
-              currency: "PKR",
-              status: "COMPLETED",
-              idempotencyKey: rewardKey,
-              relatedEntityId: level.id,
-              reason: `Completion bonus for Level ${level.levelNumber}: ${level.title}`
-            }
-          });
-          await tx.notification.create({
-            data: {
-              userId,
-              title: `Level ${level.levelNumber} Completed! \u{1F3C6}`,
-              message: `Congratulations! You completed all 10 tasks in Level ${level.levelNumber} and earned PKR ${level.completionReward.toLocaleString()}!`,
-              notificationType: "LEVEL_STATUS"
-            }
-          });
-        });
-      }
-    }
     if (isCompleted && level.levelNumber === 1) {
       await affiliateService.checkAndQualifyReferral(userId, "LEVEL_1_COMPLETED");
     }
@@ -74303,8 +74266,8 @@ var DATASET_10_LEVELS = [
     "level": 1,
     "title": "Study",
     "total_tasks": 10,
-    "level_reward": 150,
-    "total_credit_points": 150,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -74392,8 +74355,8 @@ var DATASET_10_LEVELS = [
     "level": 2,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 904,
-    "total_credit_points": 904,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -74482,8 +74445,8 @@ var DATASET_10_LEVELS = [
     "level": 3,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 4080,
-    "total_credit_points": 4080,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -74573,8 +74536,8 @@ var DATASET_10_LEVELS = [
     "level": 4,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 332e3,
-    "total_credit_points": 332e3,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -75273,7 +75236,7 @@ async function syncDatasetTasksToDatabase() {
       const levelNumber = lvlData.level;
       const title = lvlData.title;
       const requiredTaskCount = lvlData.total_tasks;
-      const completionReward = lvlData.level_reward;
+      const completionReward = 0;
       const totalCreditPoints = 0;
       const level = await prisma.level.upsert({
         where: { levelNumber },
@@ -75288,7 +75251,7 @@ async function syncDatasetTasksToDatabase() {
         create: {
           levelNumber,
           title,
-          description: `Complete all ${requiredTaskCount} tasks in Level ${levelNumber} (${title}) to claim the PKR ${completionReward.toLocaleString()} milestone reward.`,
+          description: `Complete tasks in Level ${levelNumber} (${title}) to earn verified task rewards and advance to the next level.`,
           requiredTaskCount,
           completionReward,
           totalCreditPoints,

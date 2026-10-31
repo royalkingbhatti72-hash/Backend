@@ -20,7 +20,7 @@ export async function syncDatasetTasksToDatabase(): Promise<void> {
       const levelNumber = lvlData.level;
       const title = lvlData.title;
       const requiredTaskCount = lvlData.total_tasks;
-      const completionReward = lvlData.level_reward;
+      const completionReward = 0;
       const totalCreditPoints = 0;
 
       const level = await prisma.level.upsert({
@@ -36,7 +36,7 @@ export async function syncDatasetTasksToDatabase(): Promise<void> {
         create: {
           levelNumber,
           title,
-          description: `Complete all ${requiredTaskCount} tasks in Level ${levelNumber} (${title}) to claim the PKR ${completionReward.toLocaleString()} milestone reward.`,
+          description: `Complete tasks in Level ${levelNumber} (${title}) to earn verified task rewards and advance to the next level.`,
           requiredTaskCount,
           completionReward,
           totalCreditPoints,

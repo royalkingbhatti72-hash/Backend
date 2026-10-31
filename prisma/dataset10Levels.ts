@@ -30,8 +30,8 @@ export const DATASET_10_LEVELS: LevelDatasetItem[] = [
     "level": 1,
     "title": "Study",
     "total_tasks": 10,
-    "level_reward": 150,
-    "total_credit_points": 150,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -119,8 +119,8 @@ export const DATASET_10_LEVELS: LevelDatasetItem[] = [
     "level": 2,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 904,
-    "total_credit_points": 904,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -209,8 +209,8 @@ export const DATASET_10_LEVELS: LevelDatasetItem[] = [
     "level": 3,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 4080,
-    "total_credit_points": 4080,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
@@ -300,8 +300,8 @@ export const DATASET_10_LEVELS: LevelDatasetItem[] = [
     "level": 4,
     "title": "Vlog",
     "total_tasks": 10,
-    "level_reward": 332000,
-    "total_credit_points": 332000,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,

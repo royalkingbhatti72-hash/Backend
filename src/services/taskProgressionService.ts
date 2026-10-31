@@ -398,44 +398,7 @@ export const taskProgressionService = {
       },
     });
 
-    // If level completed and has completion reward, credit if not already credited
-    if (isCompleted && level.completionReward > 0) {
-      const rewardKey = `LEVEL_REWARD_${level.id}_${userId}`;
-      const existing = await prisma.walletTransaction.findUnique({
-        where: { idempotencyKey: rewardKey },
-      });
-      if (!existing) {
-        await prisma.$transaction(async (tx) => {
-          await tx.wallet.update({
-            where: { userId },
-            data: {
-              availableBalance: { increment: level.completionReward },
-              totalEarned: { increment: level.completionReward },
-            },
-          });
-          await tx.walletTransaction.create({
-            data: {
-              userId,
-              transactionType: 'LEVEL_REWARD',
-              amount: level.completionReward,
-              currency: 'PKR',
-              status: 'COMPLETED',
-              idempotencyKey: rewardKey,
-              relatedEntityId: level.id,
-              reason: `Completion bonus for Level ${level.levelNumber}: ${level.title}`,
-            },
-          });
-          await tx.notification.create({
-            data: {
-              userId,
-              title: `Level ${level.levelNumber} Completed! 🏆`,
-              message: `Congratulations! You completed all 10 tasks in Level ${level.levelNumber} and earned PKR ${level.completionReward.toLocaleString()}!`,
-              notificationType: 'LEVEL_STATUS',
-            },
-          });
-        });
-      }
-    }
+    // Note: There are no level completion rewards; rewards are strictly per-task only.
 
     // If referee completed Level 1, evaluate referral qualification
     if (isCompleted && level.levelNumber === 1) {
