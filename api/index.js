@@ -65259,7 +65259,8 @@ router2.get("/dashboard", requireAuth, async (req, res, next) => {
     let foundActiveLevel = false;
     for (const lvl of levels) {
       const approvedCount = approvedTasksByLevel.get(lvl.id)?.size || 0;
-      if (approvedCount >= (lvl.requiredTaskCount || 10)) {
+      const isLvlCompleted = lvl.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (lvl.requiredTaskCount || 10);
+      if (isLvlCompleted) {
         completedLevelsCount++;
       } else if (!foundActiveLevel) {
         currentLevelNumber = lvl.levelNumber;
@@ -65697,7 +65698,7 @@ var taskProgressionService = {
       const taskSet = approvedTasksByLevelId.get(lvl.id);
       const lp = levelProgressByLevelId.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+      const isCompleted = lvl.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
       levelStatsByNumber.set(lvl.levelNumber, { approvedCount, isCompleted });
     }
     const l1Completed = levelStatsByNumber.get(1)?.isCompleted || false;
@@ -65740,7 +65741,7 @@ var taskProgressionService = {
       const l4ApprovedCount = levelStatsByNumber.get(4)?.approvedCount || 0;
       isTask1Eligible = l4ApprovedCount >= 1;
       if (!isTask1Eligible) {
-        task1LockMessage = "Complete Task 1 in Level 4 first to be able to complete Level 5 tasks.";
+        task1LockMessage = "Complete at least one Level 4 prepaid task to unlock Level 5 task participation.";
       }
     } else {
       const prevStats = levelStatsByNumber.get(levelNumber - 1);
@@ -65800,7 +65801,12 @@ var taskProgressionService = {
       const isApproved = progress?.status === "APPROVED" || submission?.status === "APPROVED";
       let isPrerequisiteSatisfied = false;
       let taskLockMessage = "";
-      if (task.taskNumber === 1) {
+      if (level.levelNumber === 4) {
+        isPrerequisiteSatisfied = isTask1Eligible;
+        if (!isPrerequisiteSatisfied) {
+          taskLockMessage = task1LockMessage;
+        }
+      } else if (task.taskNumber === 1) {
         isPrerequisiteSatisfied = isTask1Eligible;
         if (!isPrerequisiteSatisfied) {
           taskLockMessage = task1LockMessage;
@@ -65901,7 +65907,7 @@ var taskProgressionService = {
       submissionsCount,
       userLevelProgress?.approvedTaskCount || 0
     );
-    const isCompleted = approvedCount >= (level.requiredTaskCount || 10);
+    const isCompleted = level.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (level.requiredTaskCount || 10);
     const progress = await prisma.userLevelProgress.upsert({
       where: {
         userId_levelId: { userId, levelId }
@@ -74229,7 +74235,7 @@ function cleanUrl(rawUrl) {
   if (mdMatch) return mdMatch[1].replace(/_+$/, "");
   const urlMatch = rawUrl.match(/https?:\/\/[^\s\)\]]+/);
   if (urlMatch) return urlMatch[0].replace(/_+$/, "");
-  return rawUrl.trim().replace(/^\[|\]$/g, "").replace(/_+$/, "");
+  return rawUrl.trim().replace(/^[\[\]]+|[\[\]]+$/g, "").replace(/_+$/, "");
 }
 var DATASET_10_LEVELS = [
   {
@@ -74605,813 +74611,593 @@ var DATASET_10_LEVELS = [
     "level": 5,
     "title": "Level 5",
     "total_tasks": 10,
-    "level_reward": 3e5,
-    "total_credit_points": 3e5,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/bmyXHQQctyQ?si=WE3n94_t2VjUipve",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/XgnSxvUiXO0?si=22ktWXjGWh1OOnwt",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/pmjH9erWu48?si=ZPVv0sGjxwpdQ2JW",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/HOWaPR9brOE?si=q508JZyHn6ROxrB0",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/yqH3DcxB6Dk?si=kjp1orUfY-WKbbJS",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/31HJbpU2RpU?si=y--XuUEVnQumEdqj",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/GwifegtMmUI?si=eP2xJ1bdsoVzTyzY",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/6Ct2D12cHqw?si=_hE-crwndkoC1pBS",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/-6kARhVxEWA?si=dB6y1GiHnaEJBRkC",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/yIjjg5_5Cxw?si=jD2O34ChfbY65zqA",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   },
   {
     "level": 6,
     "title": "Level 6",
-    "total_tasks": 15,
-    "level_reward": 45e4,
-    "total_credit_points": 45e4,
+    "total_tasks": 10,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/qgz-ydhRs4s?si=Il542hKwwSHMMFT3",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/XaEkHoMtc5Q?si=h0RzVrtAK9jQBRcg",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/3nYntR_BmD0?si=OqMoHNGPDd8x4853",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/8BOnFKojVYc?si=59knG1PQVKYd6gVk",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/B3j7o3RfBVI?si=nSo3Ii77SdDR4iI4",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/TYWrS9lbHVo?si=vylP_TFVidoIjhWL",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/Jjpfl2hgN5k?si=XhKzdxX-i616kqTs",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/t1y9vFl3LQc?si=H-TnYfPxFjrPx91H",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/esY3mHyDFi4?si=3hxcM_soqfG8GTro",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/1lCZKskfCqI?si=GiRq7gaiCzepy0ka",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 11,
-        "type": "Subscribe",
-        "url": "https://youtu.be/2G34ILUfSPg?si=kAQkhhfMnBzMUxgM",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 12,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/kSeHcwfE6VQ?si=-0ADsQw_4_syKx9L",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 13,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/L-uUzPvBqd8?si=jUhVHtx89nY8_nnY",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 14,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/Cek3y8wZNd8?si=wAfx4TWuvGd4KYcX",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 15,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/neKBxcwqsU4?si=whNCyFEItWErsb7t",
-        "commission": 3e4,
-        "credit_points": 3e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   },
   {
     "level": 7,
     "title": "Level 7",
-    "total_tasks": 15,
-    "level_reward": 6e5,
-    "total_credit_points": 6e5,
+    "total_tasks": 10,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/B9WFwGvMUZg?si=0iEB2lrtL56J4cmx",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/YqedmavuG64?si=prGU4MJUaaDCnoBI",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/bA33aA83DUs?si=oOEtJwbWRdtsXZIe",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/l0EC6dvS89M?si=WlG698OLMa_adZkK",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/SJYdo3ScJDM?si=rofNESmY3HHZDE9d",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/nsV-B79x33I?si=aLI7nHiMwgl0yG1i",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/fCDVn0Ri2dU?si=MmFVxtjmJalzqsSQ",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/4z1OyqDyR2E?si=C0Qc5ZF84_vS-EtS",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/sSFYNRoo4r4?si=6hWH6qxt9ylI7pWi",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/Wr5X3lJ30R4?si=KHX-cBl50XRgR3D1",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 11,
-        "type": "Subscribe",
-        "url": "https://youtu.be/g_AZ0YMrdqA?si=3F11mD6oKWNZ0iZS",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 12,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/z5X413CeFvk?si=Wy-DnuFa7Hst6mt3",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 13,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/xum7JzyS6e8?si=EcDLPRZ13apIuVAX",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 14,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/5PPwEg1kDRE?si=NWUo_uBJcUAp7FXi",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 15,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/fHDijn2Il8E?si=s42SIQM3iiylVKBG",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   },
   {
     "level": 8,
     "title": "Level 8",
-    "total_tasks": 15,
-    "level_reward": 6e5,
-    "total_credit_points": 6e5,
+    "total_tasks": 10,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/OS-WTughD14?si=xyiP5FPupBzSfQ9p",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/d4M3YRLiSwM?si=D0a3oKwRCFUdkJ5B",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/nGNlcnGobAY?si=nK83aH5a-W8ph9Xv",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/hTkjqhOsgwc?si=QGKy8vK_l7vLut11",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/AGUb2Nn7pKQ?si=-3czbIuznEgR0tew",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/h76Q3E_9aNw?si=l3FGEQYqwFooHtvF",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/m7pxtU5qz2U?si=QoDpPdbZNjePMXMb",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/7bGRQJzAKZw?si=uwF3CcleRr4o30up",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/5Z-qAutLgHA?si=GyPFMacS3gxvVogE",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/0TCQClBCJA8?si=S9dn0asC5H9fRU8p",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 11,
-        "type": "Subscribe",
-        "url": "https://youtu.be/WQ3ilqvjWkA?si=_qrBM_NbqwQ59mE6",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 12,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/Y_UNYQfM4gc?si=rPviVuTWzMIP-uhO",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 13,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/ALEEcf3P2ik?si=lPeca_AjIgaEm_4B",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 14,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/ah8c4GSOdIE?si=N3lHphBCuhG1wdrR",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 15,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/hA9a9ZSj3zY?si=704_2oZyvqFqQsSH",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   },
   {
     "level": 9,
     "title": "Level 9",
-    "total_tasks": 20,
-    "level_reward": 8e5,
-    "total_credit_points": 8e5,
+    "total_tasks": 10,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/AnYl6Nk9GOA?si=uJMUmAkCoFVqzSZ2",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/UItWltVZZmE?si=4fMmgvmTZhm9xq9s",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/Cw-Wt4xKD2s?si=HCCHU3lcQEGIOpAV",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/jC5xlKIQgR8?si=SM5t6XKxplYQIXlP",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/X8FNAzCoCoI?si=VLs5Ol5Gh2StDnzK",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/fsJ14Bra8Io?si=Q2E7TZ-Gi0s6Eu7A",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/4tQrUif5pHY?si=qkw8NRq_gj0mmJMW",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/Nw5rO-fmL0A?si=JzoRZ80tEG6itSRk",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/EtjXNMS3eeU?si=kxWkl392jatI2qT6",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/UV63-EXSFI8?si=amwqxlSS2QF08epH",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 11,
-        "type": "Subscribe",
-        "url": "https://youtu.be/oNGDopPcghA?si=N87jtZd0fqhR6sqM",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 12,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/k_NZOTYGJhY?si=sBGO9CtwPDDSgS17",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 13,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/M2vs_zjIbOw?si=_vOS90oPdeTVnZ2w",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 14,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/-4E9tAH7cfU?si=2Al-wYIi-diJ-BlS",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 15,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/tlxJv2cdlAU?si=a1g4vUtwS8Lj_m2S",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 16,
-        "type": "Subscribe",
-        "url": "https://youtu.be/DLGqHOMIE5c?si=f4XCCwwkd0hwxnOL",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 17,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/gjV-K4g3fm4?si=n_5RYC2-NM19_VhH",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 18,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/LhUkk8z5V5E?si=yJjzGjtCLVAhvVem",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 19,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/Idek3A89slQ?si=onRru3zLmNC-Cvt_",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 20,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/LK11EmCjJzQ?si=Q3s0EJYu4GKC5XWq",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   },
   {
     "level": 10,
     "title": "Level 10",
-    "total_tasks": 20,
-    "level_reward": 8e5,
-    "total_credit_points": 8e5,
+    "total_tasks": 10,
+    "level_reward": 0,
+    "total_credit_points": 0,
     "tasks": [
       {
         "task_id": 1,
         "type": "Subscribe",
         "url": "https://youtu.be/Z22mFwbCrCA?si=9Yjc9AH0eRZ4FNxb",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 2,
         "type": "Like and Comment",
         "url": "https://youtu.be/PGpb6Zc4KkE?si=hd0i40qWqeRPca4L",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 3,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/YHccUdhUE_Y?si=u-PDsW3JgEdo5llT",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 4,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/RVpKbiTvLWY?si=BpMN-6bpskK0ORfp",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 5,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/AJtkuFN1apc?si=ampDjQmn6PkH5PWs",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 6,
         "type": "Subscribe",
         "url": "https://youtu.be/k8eR5sBUCPw?si=tMuw34hpQu6CC5Fe",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 7,
         "type": "Like and Comment",
         "url": "https://youtu.be/LSKRceF5ykE?si=EJkkg6RzukZppH0y",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 8,
         "type": "Watch Video (30s)",
         "url": "https://youtu.be/KPIC2P_jFfU?si=6Lcs9aV9QdjMDAGO",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 9,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/qOWVl6j87nI?si=rMV76Ws1W3PnzqpC",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       },
       {
         "task_id": 10,
         "type": "Watch Video (45s)",
         "url": "https://youtu.be/UrjimhELcok?si=WRKmKc2Gcyje6pTV",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 11,
-        "type": "Subscribe",
-        "url": "https://youtu.be/pLF0bhcY5l8?si=4cRiZSz35yJ1f8q6",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 12,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/JdPkgySQkyU?si=htapyrUIMYzOr_pE",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 13,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/OUdF9tyMlgM?si=rCXLot9IZombP88f",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 14,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/OQLWQEb-FgY?si=OOmTvdyEJb2U7VJV",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 15,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/p8ZHLMusfEk?si=G1GFQzDwT77oIEfc",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 16,
-        "type": "Subscribe",
-        "url": "https://youtu.be/mYDrGq0OHhQ?si=thc2AaWGV4GbAHAW",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 17,
-        "type": "Like and Comment",
-        "url": "https://youtu.be/-wrAWg_oSfE?si=iVDPEDYHDJV2G119",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 18,
-        "type": "Watch Video (30s)",
-        "url": "https://youtu.be/y8bFjc1gucQ?si=rwg40AmHWnb0iwIj",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 19,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/7lEqFKmCoaE?si=8HHU7uOV568gxPmn",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
-      },
-      {
-        "task_id": 20,
-        "type": "Watch Video (45s)",
-        "url": "https://youtu.be/2toTTlle6Vs?si=lykA3vdnPTgRclZi",
-        "commission": 4e4,
-        "credit_points": 4e4,
-        "is_prepaid": false
+        "commission": 0,
+        "credit_points": 0,
+        "is_prepaid": false,
+        "prepaid_value": 0
       }
     ]
   }
@@ -75563,7 +75349,7 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
       const taskSet = approvedTasksByLevel.get(lvl.id);
       const lp = levelProgressMap.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+      const isCompleted = lvl.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
       levelStats.set(lvl.levelNumber, { level: lvl, approvedCount, isCompleted });
     }
     const level1Completed = levelStats.get(1)?.isCompleted || false;

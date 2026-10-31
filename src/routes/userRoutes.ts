@@ -115,7 +115,11 @@ router.get('/dashboard', requireAuth, async (req: AuthRequest, res: Response, ne
 
     for (const lvl of levels) {
       const approvedCount = approvedTasksByLevel.get(lvl.id)?.size || 0;
-      if (approvedCount >= (lvl.requiredTaskCount || 10)) {
+      const isLvlCompleted =
+        lvl.levelNumber === 4
+          ? approvedCount >= 1
+          : approvedCount >= (lvl.requiredTaskCount || 10);
+      if (isLvlCompleted) {
         completedLevelsCount++;
       } else if (!foundActiveLevel) {
         currentLevelNumber = lvl.levelNumber;

@@ -6,12 +6,11 @@ let datasetSynced = false;
 /**
  * Synchronizes the 10-level dataset into PostgreSQL/Supabase.
  * Enforces:
- * - Level 1: All tasks free (Rs 15 each, total level reward Rs 150 withdrawable).
- * - Level 2: Tasks 1-9 free (Rs 40 each), Task 10 prepaid (Rs 1,360, 40% commission = Rs 544).
- * - Level 3: Tasks 1-8 free (Rs 60 each), Task 9 prepaid (Rs 3,500, 40% = Rs 1,400), Task 10 prepaid (Rs 5,500, 40% = Rs 2,200).
- * - Level 4: All 10 tasks paid (Rs 10k to 200k, 40% commission).
- * - Levels 5 to 6: All tasks free (Rs 30,000 each).
- * - Levels 7 to 10: All tasks free (Rs 40,000 each).
+ * - Level 1: 10 free tasks (Rs 15 each). All 10 required to unlock Level 2.
+ * - Level 2: Tasks 1-9 free (Rs 40 each), Task 10 prepaid (Rs 1,360, 40% commission = Rs 544). All 10 required to unlock Level 3.
+ * - Level 3: Tasks 1-8 free (Rs 60 each), Task 9 prepaid (Rs 3,500, 40% = Rs 1,400), Task 10 prepaid (Rs 5,500, 40% = Rs 2,200). All 10 required to finish Level 3.
+ * - Level 4: 10 prepaid tasks (Rs 10k to 200k, 40% commission). All 10 visible and selectable. Completing 1 task unlocks Level 5.
+ * - Levels 5 to 10: 10 free tasks each with no prepaid charges. All tasks visible. Unspecified rewards (no invented numbers).
  */
 export async function syncDatasetTasksToDatabase(): Promise<void> {
   if (datasetSynced) return;

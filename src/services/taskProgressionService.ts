@@ -117,7 +117,10 @@ export const taskProgressionService = {
       const taskSet = approvedTasksByLevelId.get(lvl.id);
       const lp = levelProgressByLevelId.get(lvl.id);
       const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
-      const isCompleted = approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
+      const isCompleted =
+        lvl.levelNumber === 4
+          ? approvedCount >= 1
+          : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
       levelStatsByNumber.set(lvl.levelNumber, { approvedCount, isCompleted });
     }
 
@@ -164,11 +167,11 @@ export const taskProgressionService = {
         task1LockMessage = 'Complete all tasks in Level 3 first to unlock Level 4 tasks.';
       }
     } else if (levelNumber === 5) {
-      // In Level 4, client needs only 1 task completed to be able to complete Level 5 tasks!
+      // In Level 4, client needs only 1 task completed to unlock Level 5 task participation!
       const l4ApprovedCount = levelStatsByNumber.get(4)?.approvedCount || 0;
       isTask1Eligible = l4ApprovedCount >= 1;
       if (!isTask1Eligible) {
-        task1LockMessage = 'Complete Task 1 in Level 4 first to be able to complete Level 5 tasks.';
+        task1LockMessage = 'Complete at least one Level 4 prepaid task to unlock Level 5 task participation.';
       }
     } else {
       // For Levels 6 to 10: requires previous level completed
@@ -246,7 +249,15 @@ export const taskProgressionService = {
       let isPrerequisiteSatisfied = false;
       let taskLockMessage = '';
 
-      if (task.taskNumber === 1) {
+      if (level.levelNumber === 4) {
+        // Level 4: All 10 tasks must be visible and selectable.
+        // Completing only ONE task out of these 10 is required to unlock Level 5.
+        // Users should not be forced to complete the remaining nine tasks.
+        isPrerequisiteSatisfied = isTask1Eligible;
+        if (!isPrerequisiteSatisfied) {
+          taskLockMessage = task1LockMessage;
+        }
+      } else if (task.taskNumber === 1) {
         isPrerequisiteSatisfied = isTask1Eligible;
         if (!isPrerequisiteSatisfied) {
           taskLockMessage = task1LockMessage;
@@ -364,7 +375,10 @@ export const taskProgressionService = {
       userLevelProgress?.approvedTaskCount || 0
     );
 
-    const isCompleted = approvedCount >= (level.requiredTaskCount || 10);
+    const isCompleted =
+      level.levelNumber === 4
+        ? approvedCount >= 1
+        : approvedCount >= (level.requiredTaskCount || 10);
 
     const progress = await prisma.userLevelProgress.upsert({
       where: {
