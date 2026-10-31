@@ -6,12 +6,6 @@ import { ensureIdentityTable } from '../services/identityService';
 
 const router = Router();
 
-// Ensure table exists on first route access
-router.use(async (req, res, next) => {
-  await ensureIdentityTable();
-  next();
-});
-
 const identitySubmissionSchema = z.object({
   idFrontImage: z.string().min(50, 'Front image of ID card is required'),
   idBackImage: z.string().min(50, 'Back image of ID card is required'),
@@ -23,6 +17,7 @@ const identitySubmissionSchema = z.object({
  */
 router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const userId = req.user!.id;
     const record = await prisma.identityVerification.findUnique({
       where: { userId },
@@ -38,22 +33,13 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   }
 });
 
-router.get('/debug-db', async (req, res) => {
-  try {
-    const dbInfo: any = await prisma.$queryRawUnsafe(`SELECT current_database(), current_user, inet_server_addr()`);
-    const tables: any = await prisma.$queryRawUnsafe(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`);
-    res.json({ dbInfo, tableNames: tables.map((t: any) => t.table_name) });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 /**
  * POST /api/user/identity
  * Submits or re-submits ID card front and back images for verification
  */
 router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const userId = req.user!.id;
     const { idFrontImage, idBackImage } = identitySubmissionSchema.parse(req.body);
 

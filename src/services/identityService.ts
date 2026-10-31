@@ -3,7 +3,7 @@ import { prisma } from '../prisma';
 let tableEnsured = false;
 
 /**
- * Ensures the "IdentityVerification" table and indexes exist in PostgreSQL.
+ * Ensures the "IdentityVerification" table exists in PostgreSQL.
  * Guarantees zero downtime and automatic schema provision across serverless instances.
  */
 export async function ensureIdentityTable(): Promise<void> {
@@ -27,13 +27,12 @@ export async function ensureIdentityTable(): Promise<void> {
         "submittedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "reviewedAt" TIMESTAMP(3),
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "IdentityVerification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
-      );
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "IdentityVerification_status_createdAt_idx" ON "IdentityVerification"("status", "createdAt" DESC);
+      CREATE INDEX IF NOT EXISTS "IdentityVerification_status_idx" ON "IdentityVerification"("status")
     `);
 
     tableEnsured = true;

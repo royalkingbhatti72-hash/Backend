@@ -77247,12 +77247,11 @@ async function ensureIdentityTable() {
         "submittedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "reviewedAt" TIMESTAMP(3),
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "IdentityVerification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
-      );
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
     `);
     await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "IdentityVerification_status_createdAt_idx" ON "IdentityVerification"("status", "createdAt" DESC);
+      CREATE INDEX IF NOT EXISTS "IdentityVerification_status_idx" ON "IdentityVerification"("status")
     `);
     tableEnsured3 = true;
   } catch (err) {
@@ -79556,16 +79555,13 @@ var telegramRoutes_default = router12;
 // src/routes/identityRoutes.ts
 var import_express13 = __toESM(require_express2(), 1);
 var router13 = (0, import_express13.Router)();
-router13.use(async (req, res, next) => {
-  await ensureIdentityTable();
-  next();
-});
 var identitySubmissionSchema = external_exports.object({
   idFrontImage: external_exports.string().min(50, "Front image of ID card is required"),
   idBackImage: external_exports.string().min(50, "Back image of ID card is required")
 });
 router13.get("/", requireAuth, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const userId = req.user.id;
     const record2 = await prisma.identityVerification.findUnique({
       where: { userId }
@@ -79579,17 +79575,9 @@ router13.get("/", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
-router13.get("/debug-db", async (req, res) => {
-  try {
-    const dbInfo = await prisma.$queryRawUnsafe(`SELECT current_database(), current_user, inet_server_addr()`);
-    const tables = await prisma.$queryRawUnsafe(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`);
-    res.json({ dbInfo, tableNames: tables.map((t) => t.table_name) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 router13.post("/", requireAuth, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const userId = req.user.id;
     const { idFrontImage, idBackImage } = identitySubmissionSchema.parse(req.body);
     const existing = await prisma.identityVerification.findUnique({
