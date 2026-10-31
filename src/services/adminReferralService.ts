@@ -45,7 +45,7 @@ export async function replenishAvailableCodesTo100(): Promise<void> {
       WHERE "status" = 'AVAILABLE' AND "code" ~ '^[a-zA-Z]{6}$' AND "code" != LOWER("code")
     `);
 
-    const countRes: any[] = await prisma.$queryRawUnsafe(`
+    const countRes = await prisma.$queryRawUnsafe<any[]>(`
       SELECT COUNT(*)::int AS count FROM "AdminReferralCode" WHERE "status" = 'AVAILABLE'
     `);
     const currentAvailable = Number(countRes[0]?.count || 0);
@@ -54,7 +54,7 @@ export async function replenishAvailableCodesTo100(): Promise<void> {
     if (needed <= 0) return;
 
     // Fetch existing codes to avoid collisions
-    const existingRows: any[] = await prisma.$queryRawUnsafe(`
+    const existingRows = await prisma.$queryRawUnsafe<any[]>(`
       SELECT LOWER("code") AS code FROM "AdminReferralCode"
     `);
     const existingSet = new Set<string>(existingRows.map((r) => String(r.code).toLowerCase()));
@@ -136,14 +136,14 @@ export async function ensureAdminReferralCodes(): Promise<void> {
 export async function getAdminReferralCodesOverview() {
   await ensureAdminReferralCodes();
 
-  const [availableCodes, usedCodes]: [any[], any[]] = await Promise.all([
-    prisma.$queryRawUnsafe(`
+  const [availableCodes, usedCodes] = await Promise.all([
+    prisma.$queryRawUnsafe<any[]>(`
       SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
       FROM "AdminReferralCode"
       WHERE "status" = 'AVAILABLE'
       ORDER BY "createdAt" DESC, "code" ASC
     `),
-    prisma.$queryRawUnsafe(`
+    prisma.$queryRawUnsafe<any[]>(`
       SELECT "id", "code", "status", "usedById", "usedByName", "usedByPhone", "usedAt", "notes", "createdAt", "updatedAt"
       FROM "AdminReferralCode"
       WHERE "status" = 'USED'
@@ -170,7 +170,7 @@ export async function validateAdminReferralCode(rawCode: string): Promise<boolea
   const code = (rawCode || '').trim().toLowerCase();
   if (!code) return false;
 
-  const result: any[] = await prisma.$queryRawUnsafe(
+  const result = await prisma.$queryRawUnsafe<any[]>(
     `
     SELECT "id" FROM "AdminReferralCode"
     WHERE LOWER("code") = $1 AND "status" = 'AVAILABLE'
@@ -227,7 +227,7 @@ export async function generateAdditionalCodes(count = 10): Promise<string[]> {
   await ensureAdminReferralCodes();
   const generated: string[] = [];
 
-  const existingRows: any[] = await prisma.$queryRawUnsafe(`
+  const existingRows = await prisma.$queryRawUnsafe<any[]>(`
     SELECT LOWER("code") AS code FROM "AdminReferralCode"
   `);
   const existingSet = new Set<string>(existingRows.map((r) => String(r.code).toLowerCase()));
