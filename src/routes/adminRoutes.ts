@@ -21,6 +21,10 @@ import {
   setLevelWithdrawalNotice,
   DEFAULT_LEVEL_WITHDRAWAL_NOTICES,
 } from '../services/levelNoticeService';
+import {
+  getAllTelegramUsers,
+  grantMoreCodesToTelegramUser,
+} from '../services/telegramService';
 
 const router = Router();
 
@@ -2256,6 +2260,50 @@ router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest
 
     const data = await getAdminReferralCodesOverview();
     res.json({ message: `Code "${formattedCode}" created successfully!`, ...data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 15. TELEGRAM BOT CLIENT MANAGEMENT & QUOTA
+// ==========================================
+
+router.get('/telegram-users', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const users = await getAllTelegramUsers();
+    res.json({ users });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/telegram-users/:chatId/grant', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const chatId = req.params.chatId as string;
+    const { amount = 10 } = req.body;
+    const quotaToAdd = Math.max(1, parseInt(String(amount), 10) || 10);
+
+    const result = await grantMoreCodesToTelegramUser(chatId, quotaToAdd);
+    if (!result.success) {
+      return res.status(404).json({ error: result.error || 'Failed to grant codes' });
+    }
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'GRANTED_TELEGRAM_REFERRAL_CODES',
+      entityType: 'TelegramUser',
+      entityId: chatId,
+      newState: result.user,
+      reason: `Granted +${quotaToAdd} referral codes to Telegram user ${chatId}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      message: `Successfully granted +${quotaToAdd} invitation codes!`,
+      user: result.user,
+    });
   } catch (err) {
     next(err);
   }

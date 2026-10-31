@@ -1,5 +1,5 @@
 import { prisma } from '../prisma';
-import { generateAdditionalCodes, replenishAvailableCodesTo100 } from './adminReferralService';
+import { generateAdditionalCodes } from './adminReferralService';
 
 export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || '9207587440:AAHXQL1Krzbj8zRMqFXJypFiH-N_ePPghgk';
@@ -8,17 +8,54 @@ export const TELEGRAM_ACCESS_PASSWORD =
 
 const TG_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
-export interface TelegramAuthUser {
-  chatId: number | string;
-  username?: string;
-  firstName?: string;
-  authAt: string;
+export interface TelegramUserRecord {
+  id: string;
+  chatId: string;
+  username: string | null;
+  firstName: string | null;
+  status: string;
+  totalQuota: number;
+  codesGenerated: number;
+  remainingQuota: number;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+let tableEnsured = false;
+
+/**
+ * Ensures the TelegramUser table exists in PostgreSQL.
+ */
+export async function ensureTelegramUserTable(): Promise<void> {
+  if (tableEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "TelegramUser" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "chatId" TEXT NOT NULL UNIQUE,
+        "username" TEXT,
+        "firstName" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'REGISTERED',
+        "totalQuota" INT NOT NULL DEFAULT 10,
+        "codesGenerated" INT NOT NULL DEFAULT 0,
+        "remainingQuota" INT NOT NULL DEFAULT 10,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "TelegramUser_chatId_idx" ON "TelegramUser"("chatId")
+    `);
+    tableEnsured = true;
+  } catch (err) {
+    console.error('Error ensuring TelegramUser table:', err);
+  }
 }
 
 /**
- * Sends a message to a Telegram chat via Bot API.
+ * Sends an explicit HTTP message via Telegram Bot API (e.g. for user signup notifications).
  */
-export async function sendTelegramMessage(
+export async function sendTelegramDirectMessage(
   chatId: number | string,
   text: string,
   keyboard?: any
@@ -29,7 +66,6 @@ export async function sendTelegramMessage(
       text,
       parse_mode: 'Markdown',
     };
-
     if (keyboard) {
       payload.reply_markup = keyboard;
     }
@@ -40,15 +76,9 @@ export async function sendTelegramMessage(
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`Telegram sendMessage failed [${res.status}]:`, errText);
-      return false;
-    }
-
-    return true;
+    return res.ok;
   } catch (err) {
-    console.error('Error sending Telegram message:', err);
+    console.error('Error sending direct Telegram message:', err);
     return false;
   }
 }
@@ -88,82 +118,77 @@ export async function getTelegramWebhookInfo(): Promise<any> {
 }
 
 /**
- * Checks if a chat is authenticated.
+ * Retrieves a registered Telegram user by chat ID.
  */
-export async function isChatAuthenticated(chatId: number | string): Promise<boolean> {
-  try {
-    const setting = await prisma.siteSetting.findUnique({
-      where: { key: 'TELEGRAM_AUTHORIZED_CHATS' },
-    });
-
-    if (!setting || !setting.value) return false;
-    const list: TelegramAuthUser[] = JSON.parse(setting.value);
-    return list.some((u) => String(u.chatId) === String(chatId));
-  } catch {
-    return false;
-  }
+export async function getTelegramUserByChatId(
+  chatId: string | number
+): Promise<TelegramUserRecord | null> {
+  await ensureTelegramUserTable();
+  const rows = await prisma.$queryRawUnsafe<TelegramUserRecord[]>(
+    `SELECT "id", "chatId", "username", "firstName", "status", "totalQuota", "codesGenerated", "remainingQuota", "createdAt", "updatedAt"
+     FROM "TelegramUser"
+     WHERE "chatId" = $1
+     LIMIT 1`,
+    String(chatId)
+  );
+  return rows[0] || null;
 }
 
 /**
- * Authorizes a chat after entering the correct password.
+ * Registers a new Telegram user with default 10 codes quota upon entering the password.
  */
-export async function authorizeChat(
-  chatId: number | string,
-  userMeta?: { username?: string; firstName?: string }
-): Promise<void> {
-  try {
-    const setting = await prisma.siteSetting.findUnique({
-      where: { key: 'TELEGRAM_AUTHORIZED_CHATS' },
-    });
+export async function registerTelegramUser(
+  chatId: string | number,
+  meta?: { username?: string; firstName?: string }
+): Promise<TelegramUserRecord> {
+  await ensureTelegramUserTable();
+  const id = `tgu_${chatId}`;
+  const strChatId = String(chatId);
+  const username = meta?.username || null;
+  const firstName = meta?.firstName || null;
 
-    let list: TelegramAuthUser[] = [];
-    if (setting && setting.value) {
-      try {
-        list = JSON.parse(setting.value);
-      } catch {
-        list = [];
-      }
-    }
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "TelegramUser" ("id", "chatId", "username", "firstName", "status", "totalQuota", "codesGenerated", "remainingQuota", "createdAt", "updatedAt")
+     VALUES ($1, $2, $3, $4, 'REGISTERED', 10, 0, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT ("chatId") DO UPDATE SET
+       "username" = COALESCE(EXCLUDED."username", "TelegramUser"."username"),
+       "firstName" = COALESCE(EXCLUDED."firstName", "TelegramUser"."firstName"),
+       "updatedAt" = CURRENT_TIMESTAMP`,
+    id,
+    strChatId,
+    username,
+    firstName
+  );
 
-    const existingIndex = list.findIndex((u) => String(u.chatId) === String(chatId));
-    const record: TelegramAuthUser = {
-      chatId,
-      username: userMeta?.username,
-      firstName: userMeta?.firstName,
-      authAt: new Date().toISOString(),
+  const user = await getTelegramUserByChatId(strChatId);
+  return user!;
+}
+
+/**
+ * Assigns an available 6-letter referral code to the user and decrements their remaining quota.
+ */
+export async function generateCodeForTelegramUser(
+  chatId: string | number,
+  firstName?: string
+): Promise<{ success: boolean; code?: string; remainingQuota?: number; totalQuota?: number; error?: string }> {
+  await ensureTelegramUserTable();
+  const strChatId = String(chatId);
+  const user = await getTelegramUserByChatId(strChatId);
+
+  if (!user) {
+    return { success: false, error: 'NOT_REGISTERED' };
+  }
+
+  if (user.remainingQuota <= 0) {
+    return {
+      success: false,
+      error: 'QUOTA_EXHAUSTED',
+      remainingQuota: 0,
+      totalQuota: user.totalQuota,
     };
-
-    if (existingIndex >= 0) {
-      list[existingIndex] = record;
-    } else {
-      list.push(record);
-    }
-
-    await prisma.siteSetting.upsert({
-      where: { key: 'TELEGRAM_AUTHORIZED_CHATS' },
-      create: {
-        key: 'TELEGRAM_AUTHORIZED_CHATS',
-        value: JSON.stringify(list),
-        category: 'REFERRAL',
-        description: 'Authorized Telegram client chat IDs for invitation code generation',
-      },
-      update: {
-        value: JSON.stringify(list),
-      },
-    });
-  } catch (err) {
-    console.error('Error authorizing Telegram chat:', err);
   }
-}
 
-/**
- * Assigns a random available 6-letter referral code to the requesting Telegram chat.
- */
-export async function assignCodeForTelegramChat(
-  chatId: number | string,
-  userMeta?: { username?: string; firstName?: string }
-): Promise<string> {
-  // Query a random available code
+  // 1. Fetch a random available code
   const available = await prisma.$queryRawUnsafe<any[]>(`
     SELECT "id", "code"
     FROM "AdminReferralCode"
@@ -179,7 +204,6 @@ export async function assignCodeForTelegramChat(
     codeId = available[0].id;
     code = available[0].code;
   } else {
-    // Generate fresh codes if pool is exhausted
     const generated = await generateAdditionalCodes(10);
     code = generated[0];
     const row = await prisma.$queryRawUnsafe<any[]>(
@@ -189,23 +213,188 @@ export async function assignCodeForTelegramChat(
     codeId = row[0]?.id || `arc_tg_${Date.now()}`;
   }
 
-  // Tag the code with TG:chatId in notes
-  const tag = `TG:${chatId}|${userMeta?.username || userMeta?.firstName || 'Client'}`;
+  // 2. Tag code with client's Telegram info in notes
+  const tag = `TG:${strChatId}|${firstName || user.firstName || 'Client'}`;
   await prisma.$executeRawUnsafe(
     `UPDATE "AdminReferralCode" SET "notes" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
     tag,
     codeId
   );
 
-  return code;
+  // 3. Decrement user quota and increment codesGenerated atomically
+  await prisma.$executeRawUnsafe(
+    `UPDATE "TelegramUser"
+     SET "codesGenerated" = "codesGenerated" + 1,
+         "remainingQuota" = GREATEST(0, "remainingQuota" - 1),
+         "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "chatId" = $1`,
+    strChatId
+  );
+
+  const updatedUser = await getTelegramUserByChatId(strChatId);
+
+  return {
+    success: true,
+    code,
+    remainingQuota: updatedUser?.remainingQuota ?? user.remainingQuota - 1,
+    totalQuota: updatedUser?.totalQuota ?? user.totalQuota,
+  };
 }
 
 /**
- * Notifies the Telegram client who requested this code that it has been used.
+ * Handles incoming update from Telegram Webhook and returns the response action directly
+ * for instant sub-second delivery without extra HTTP round trips.
+ */
+export async function handleTelegramWebhookUpdate(update: any): Promise<any | null> {
+  const message = update?.message;
+  if (!message || !message.text) return null;
+
+  const chatId = message.chat.id;
+  const strChatId = String(chatId);
+  const rawText = message.text.trim();
+  const lowerText = rawText.toLowerCase();
+  const firstName = message.from?.first_name || 'Friend';
+  const username = message.from?.username || null;
+
+  const authKeyboard = {
+    keyboard: [[{ text: 'code' }]],
+    resize_keyboard: true,
+    one_time_keyboard: false,
+  };
+
+  const user = await getTelegramUserByChatId(strChatId);
+
+  // ==========================================
+  // SCENARIO 1: USER IS ALREADY REGISTERED
+  // ==========================================
+  if (user) {
+    // A. User sends /start or start again
+    if (lowerText === '/start' || lowerText === 'start') {
+      return {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text:
+          `You have already registered!\n\n` +
+          `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*\n\n` +
+          `👉 Send *code* to generate an invitation code.`,
+        parse_mode: 'Markdown',
+        reply_markup: authKeyboard,
+      };
+    }
+
+    // B. User requests a new invitation code
+    if (lowerText === 'code' || lowerText === '/code' || lowerText === 'get code') {
+      const result = await generateCodeForTelegramUser(strChatId, firstName);
+
+      if (!result.success) {
+        if (result.error === 'QUOTA_EXHAUSTED') {
+          return {
+            method: 'sendMessage',
+            chat_id: chatId,
+            text:
+              `⚠️ You have used all your *${result.totalQuota}* available codes.\n\n` +
+              `Please contact administration to grant you more referral codes.`,
+            parse_mode: 'Markdown',
+          };
+        }
+        return {
+          method: 'sendMessage',
+          chat_id: chatId,
+          text: `Could not generate code at the moment. Please try again in a few seconds.`,
+          parse_mode: 'Markdown',
+        };
+      }
+
+      return {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text:
+          `🎟️ *Your Invitation Code:*\n\n` +
+          `\`${result.code}\`\n\n` +
+          `📋 _(Tap code above to copy)_\n\n` +
+          `📊 *Remaining codes:* ${result.remainingQuota} / ${result.totalQuota}`,
+        parse_mode: 'Markdown',
+        reply_markup: authKeyboard,
+      };
+    }
+
+    // C. User enters password again
+    if (rawText === TELEGRAM_ACCESS_PASSWORD) {
+      return {
+        method: 'sendMessage',
+        chat_id: chatId,
+        text:
+          `You are already registered!\n\n` +
+          `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*\n\n` +
+          `Send *code* to receive an invitation code.`,
+        parse_mode: 'Markdown',
+        reply_markup: authKeyboard,
+      };
+    }
+
+    // D. Default response for any other message
+    return {
+      method: 'sendMessage',
+      chat_id: chatId,
+      text:
+        `Send *code* to receive an invitation code.\n\n` +
+        `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*`,
+      parse_mode: 'Markdown',
+      reply_markup: authKeyboard,
+    };
+  }
+
+  // ==========================================
+  // SCENARIO 2: USER IS NOT REGISTERED YET
+  // ==========================================
+
+  // A. User enters the correct password
+  if (rawText === TELEGRAM_ACCESS_PASSWORD) {
+    const newUser = await registerTelegramUser(strChatId, { username, firstName });
+
+    return {
+      method: 'sendMessage',
+      chat_id: chatId,
+      text:
+        `✅ *Registration Successful, ${firstName}!*\n\n` +
+        `You have been granted *${newUser.remainingQuota} invitation codes*.\n\n` +
+        `👉 Send *code* or tap the button below to get an invitation code.`,
+      parse_mode: 'Markdown',
+      reply_markup: authKeyboard,
+    };
+  }
+
+  // B. User sends /start or greeting
+  if (lowerText === '/start' || lowerText === 'start') {
+    return {
+      method: 'sendMessage',
+      chat_id: chatId,
+      text:
+        `👋 *Welcome, ${firstName}!*\n\n` +
+        `Please enter the password to register and receive your invitation codes:`,
+      parse_mode: 'Markdown',
+    };
+  }
+
+  // C. Incorrect password entered
+  return {
+    method: 'sendMessage',
+    chat_id: chatId,
+    text:
+      `❌ Incorrect password.\n\n` +
+      `Please enter the correct password to register:`,
+    parse_mode: 'Markdown',
+  };
+}
+
+/**
+ * Notifies the Telegram client when their invitation code is used during user registration.
+ * Exact simple format requested:
+ * "This invitation code <code> is used to creat the account with the name of <name>"
  */
 export async function notifyTelegramCodeUsed(
   code: string,
-  user: { name: string; phone: string }
+  user: { name: string; phone?: string }
 ): Promise<void> {
   try {
     const rows = await prisma.$queryRawUnsafe<any[]>(
@@ -216,26 +405,14 @@ export async function notifyTelegramCodeUsed(
     if (rows.length === 0 || !rows[0].notes) return;
     const notes: string = rows[0].notes;
 
-    // Look for TG:<chatId> tag
     const match = notes.match(/TG:([0-9-]+)/);
     if (!match) return;
 
     const targetChatId = match[1];
-    const nowStr = new Date().toLocaleString('en-US', {
-      timeZone: 'Asia/Karachi',
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
 
-    const message =
-      `🔔 *Invitation Code Used!*\n\n` +
-      `🎟️ *Code:* \`${code.toLowerCase()}\`\n` +
-      `👤 *Used by:* *${user.name}*\n` +
-      `📱 *Phone:* \`${user.phone}\`\n` +
-      `⏰ *Time:* ${nowStr} (PKT)\n\n` +
-      `✅ Your user has successfully registered an account!`;
+    const simpleMessage = `This invitation code \`${code.toLowerCase()}\` is used to create the account with the name of *${user.name}*.`;
 
-    await sendTelegramMessage(targetChatId, message, {
+    await sendTelegramDirectMessage(targetChatId, simpleMessage, {
       keyboard: [[{ text: 'code' }]],
       resize_keyboard: true,
     });
@@ -245,83 +422,56 @@ export async function notifyTelegramCodeUsed(
 }
 
 /**
- * Handles incoming updates from Telegram Webhook.
+ * Fetches all Telegram users for Admin Panel.
  */
-export async function handleTelegramUpdate(update: any): Promise<void> {
-  const message = update?.message;
-  if (!message || !message.text) return;
+export async function getAllTelegramUsers(): Promise<TelegramUserRecord[]> {
+  await ensureTelegramUserTable();
+  const rows = await prisma.$queryRawUnsafe<TelegramUserRecord[]>(`
+    SELECT "id", "chatId", "username", "firstName", "status", "totalQuota", "codesGenerated", "remainingQuota", "createdAt", "updatedAt"
+    FROM "TelegramUser"
+    ORDER BY "createdAt" DESC
+  `);
+  return rows;
+}
 
-  const chatId = message.chat.id;
-  const rawText = message.text.trim();
-  const lowerText = rawText.toLowerCase();
-  const firstName = message.from?.first_name || 'Friend';
-  const username = message.from?.username;
+/**
+ * Admin action: Grants additional referral codes to a Telegram user.
+ */
+export async function grantMoreCodesToTelegramUser(
+  chatId: string,
+  additionalQuota: number
+): Promise<{ success: boolean; user?: TelegramUserRecord; error?: string }> {
+  await ensureTelegramUserTable();
+  const strChatId = String(chatId);
+  const user = await getTelegramUserByChatId(strChatId);
 
-  const isAuth = await isChatAuthenticated(chatId);
+  if (!user) {
+    return { success: false, error: 'Telegram user not found' };
+  }
 
-  // Default Keyboard for authenticated users
-  const authKeyboard = {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "TelegramUser"
+     SET "totalQuota" = "totalQuota" + $1,
+         "remainingQuota" = "remainingQuota" + $1,
+         "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "chatId" = $2`,
+    additionalQuota,
+    strChatId
+  );
+
+  const updated = await getTelegramUserByChatId(strChatId);
+
+  // Notify client on Telegram about the quota increase
+  const notifyText =
+    `🎉 *Quota Updated!*\n\n` +
+    `Administration has granted you *+${additionalQuota} more invitation codes*.\n\n` +
+    `📊 You now have *${updated?.remainingQuota}* codes available.\n\n` +
+    `Send *code* to generate a new invitation code.`;
+
+  await sendTelegramDirectMessage(strChatId, notifyText, {
     keyboard: [[{ text: 'code' }]],
     resize_keyboard: true,
-    one_time_keyboard: false,
-  };
+  });
 
-  // Case 1: User enters the secret password
-  if (rawText === TELEGRAM_ACCESS_PASSWORD) {
-    await authorizeChat(chatId, { username, firstName });
-    await sendTelegramMessage(
-      chatId,
-      `✅ *Access Granted, ${firstName}!*\n\n` +
-        `You are now authenticated to generate official invitation codes for new user signups.\n\n` +
-        `👉 Send *code* anytime or tap the button below to get an invitation code.`,
-      authKeyboard
-    );
-    return;
-  }
-
-  // Case 2: Not authenticated yet
-  if (!isAuth) {
-    await sendTelegramMessage(
-      chatId,
-      `👋 *Welcome, ${firstName}!*\n\n` +
-        `Welcome to the *Official Invitation Code Bot*.\n\n` +
-        `🔒 Please send the *password* to unlock invitation code generation:`
-    );
-    return;
-  }
-
-  // Case 3: Authenticated user requests code
-  if (lowerText === 'code' || lowerText === '/code' || lowerText === 'get code') {
-    const code = await assignCodeForTelegramChat(chatId, { username, firstName });
-
-    await sendTelegramMessage(
-      chatId,
-      `🎟️ *Your Invitation Code:*\n\n` +
-        `\`${code}\`\n\n` +
-        `📋 _(Tap code above to copy)_\n\n` +
-        `Give this 6-letter code to your user to create their account.\n\n` +
-        `🔔 *You will receive an instant message here the moment this code is used to register!*`,
-      authKeyboard
-    );
-    return;
-  }
-
-  // Case 4: Authenticated user sends /start or greeting
-  if (lowerText === '/start' || lowerText === 'help' || lowerText === '/help') {
-    await sendTelegramMessage(
-      chatId,
-      `👋 *Welcome Back, ${firstName}!*\n\n` +
-        `Your access is active.\n\n` +
-        `👉 Send *code* to generate a random invitation code.`,
-      authKeyboard
-    );
-    return;
-  }
-
-  // Fallback for unknown messages from authenticated user
-  await sendTelegramMessage(
-    chatId,
-    `Send *code* to receive a random invitation code.`,
-    authKeyboard
-  );
+  return { success: true, user: updated! };
 }
