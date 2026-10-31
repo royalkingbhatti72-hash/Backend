@@ -19253,8 +19253,8 @@ var require_escape_html = __commonJS({
   "node_modules/escape-html/index.js"(exports, module) {
     "use strict";
     var matchHtmlRegExp = /["'&<>]/;
-    module.exports = escapeHtml;
-    function escapeHtml(string4) {
+    module.exports = escapeHtml2;
+    function escapeHtml2(string4) {
       var str = "" + string4;
       var match = matchHtmlRegExp.exec(str);
       if (!match) {
@@ -19385,13 +19385,13 @@ var require_finalhandler = __commonJS({
     "use strict";
     var debug = require_src()("finalhandler");
     var encodeUrl = require_encodeurl();
-    var escapeHtml = require_escape_html();
+    var escapeHtml2 = require_escape_html();
     var onFinished = require_on_finished();
     var parseUrl = require_parseurl();
     var statuses = require_statuses();
     var isFinished = onFinished.isFinished;
     function createHtmlDocument(message) {
-      var body = escapeHtml(message).replaceAll("\n", "<br>").replaceAll("  ", " &nbsp;");
+      var body = escapeHtml2(message).replaceAll("\n", "<br>").replaceAll("  ", " &nbsp;");
       return '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>Error</title>\n</head>\n<body>\n<pre>' + body + "</pre>\n</body>\n</html>\n";
     }
     module.exports = finalhandler;
@@ -23307,7 +23307,7 @@ var require_send = __commonJS({
     var createError = require_http_errors();
     var debug = require_src()("send");
     var encodeUrl = require_encodeurl();
-    var escapeHtml = require_escape_html();
+    var escapeHtml2 = require_escape_html();
     var etag = require_etag();
     var fresh = require_fresh();
     var fs2 = __require("fs");
@@ -23360,7 +23360,7 @@ var require_send = __commonJS({
       }
       var res = this.res;
       var msg = statuses.message[status] || String(status);
-      var doc = createHtmlDocument("Error", escapeHtml(msg));
+      var doc = createHtmlDocument("Error", escapeHtml2(msg));
       clearHeaders(res);
       if (err && err.headers) {
         setHeaders(res, err.headers);
@@ -23460,7 +23460,7 @@ var require_send = __commonJS({
         return;
       }
       var loc = encodeUrl(collapseLeadingSlashes(this.path + "/"));
-      var doc = createHtmlDocument("Redirecting", "Redirecting to " + escapeHtml(loc));
+      var doc = createHtmlDocument("Redirecting", "Redirecting to " + escapeHtml2(loc));
       res.statusCode = 301;
       res.setHeader("Content-Type", "text/html; charset=UTF-8");
       res.setHeader("Content-Length", Buffer.byteLength(doc));
@@ -23864,7 +23864,7 @@ var require_response = __commonJS({
     var createError = require_http_errors();
     var deprecate = require_depd()("express");
     var encodeUrl = require_encodeurl();
-    var escapeHtml = require_escape_html();
+    var escapeHtml2 = require_escape_html();
     var http = __require("node:http");
     var onFinished = require_on_finished();
     var mime = require_mime_types();
@@ -24203,7 +24203,7 @@ var require_response = __commonJS({
           body = statuses.message[status] + ". Redirecting to " + address;
         },
         html: function() {
-          var u = escapeHtml(address);
+          var u = escapeHtml2(address);
           body = "<!DOCTYPE html><head><title>" + statuses.message[status] + "</title></head><body><p>" + statuses.message[status] + ". Redirecting to " + u + "</p></body>";
         },
         default: function() {
@@ -24331,7 +24331,7 @@ var require_serve_static = __commonJS({
   "node_modules/serve-static/index.js"(exports, module) {
     "use strict";
     var encodeUrl = require_encodeurl();
-    var escapeHtml = require_escape_html();
+    var escapeHtml2 = require_escape_html();
     var parseUrl = require_parseurl();
     var resolve = __require("path").resolve;
     var send = require_send();
@@ -24417,7 +24417,7 @@ var require_serve_static = __commonJS({
         originalUrl.path = null;
         originalUrl.pathname = collapseLeadingSlashes(originalUrl.pathname + "/");
         var loc = encodeUrl(url2.format(originalUrl));
-        var doc = createHtmlDocument("Redirecting", "Redirecting to " + escapeHtml(loc));
+        var doc = createHtmlDocument("Redirecting", "Redirecting to " + escapeHtml2(loc));
         res.statusCode = 301;
         res.setHeader("Content-Type", "text/html; charset=UTF-8");
         res.setHeader("Content-Length", Buffer.byteLength(doc));
@@ -64864,7 +64864,7 @@ async function requireAuth(req, res, next) {
 }
 
 // src/services/telegramService.ts
-var TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "9207587440:AAHXQL1Krzbj8zRMqFXJypFiH-N_ePPghgk";
+var TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "9295985286:AAHb0EQFD-OMsd5bfrNgaPMTfkUDm4-Gph8";
 var TELEGRAM_ACCESS_PASSWORD = process.env.TELEGRAM_ACCESS_PASSWORD || "9989GHYRT89";
 var TG_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 var tableEnsured = false;
@@ -64893,12 +64893,16 @@ async function ensureTelegramUserTable() {
     console.error("Error ensuring TelegramUser table:", err);
   }
 }
-async function sendTelegramDirectMessage(chatId, text, keyboard) {
+function escapeHtml(text) {
+  if (!text) return "";
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+async function sendTelegramDirectMessage(chatId, text, keyboard, parseMode = "HTML") {
   try {
     const payload = {
       chat_id: chatId,
       text,
-      parse_mode: "Markdown"
+      parse_mode: parseMode
     };
     if (keyboard) {
       payload.reply_markup = keyboard;
@@ -65052,10 +65056,10 @@ async function handleTelegramWebhookUpdate(update) {
         chat_id: chatId,
         text: `You have already registered!
 
-\u{1F4CA} Available codes: *${user.remainingQuota}* / *${user.totalQuota}*
+\u{1F4CA} Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>
 
-\u{1F449} Send *code* to generate an invitation code.`,
-        parse_mode: "Markdown",
+\u{1F449} Send <b>code</b> to generate an invitation code.`,
+        parse_mode: "HTML",
         reply_markup: authKeyboard
       };
     }
@@ -65066,30 +65070,28 @@ async function handleTelegramWebhookUpdate(update) {
           return {
             method: "sendMessage",
             chat_id: chatId,
-            text: `\u26A0\uFE0F You have used all your *${result.totalQuota}* available codes.
+            text: `\u26A0\uFE0F You have used all your <b>${result.totalQuota}</b> available codes.
 
 Please contact administration to grant you more referral codes.`,
-            parse_mode: "Markdown"
+            parse_mode: "HTML"
           };
         }
         return {
           method: "sendMessage",
           chat_id: chatId,
           text: `Could not generate code at the moment. Please try again in a few seconds.`,
-          parse_mode: "Markdown"
+          parse_mode: "HTML"
         };
       }
       return {
         method: "sendMessage",
         chat_id: chatId,
-        text: `\u{1F39F}\uFE0F *Your Invitation Code:*
+        text: `\u{1F39F}\uFE0F <b>Your Invitation Code:</b>
 
-\`${result.code}\`
+<b><code>${result.code}</code></b>
 
-\u{1F4CB} _(Tap code above to copy)_
-
-\u{1F4CA} *Remaining codes:* ${result.remainingQuota} / ${result.totalQuota}`,
-        parse_mode: "Markdown",
+\u{1F4CA} <b>Remaining codes:</b> ${result.remainingQuota} / ${result.totalQuota}`,
+        parse_mode: "HTML",
         reply_markup: authKeyboard
       };
     }
@@ -65099,34 +65101,35 @@ Please contact administration to grant you more referral codes.`,
         chat_id: chatId,
         text: `You are already registered!
 
-\u{1F4CA} Available codes: *${user.remainingQuota}* / *${user.totalQuota}*
+\u{1F4CA} Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>
 
-Send *code* to receive an invitation code.`,
-        parse_mode: "Markdown",
+Send <b>code</b> to receive an invitation code.`,
+        parse_mode: "HTML",
         reply_markup: authKeyboard
       };
     }
     return {
       method: "sendMessage",
       chat_id: chatId,
-      text: `Send *code* to receive an invitation code.
+      text: `Send <b>code</b> to receive an invitation code.
 
-\u{1F4CA} Available codes: *${user.remainingQuota}* / *${user.totalQuota}*`,
-      parse_mode: "Markdown",
+\u{1F4CA} Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>`,
+      parse_mode: "HTML",
       reply_markup: authKeyboard
     };
   }
+  const safeFirstName = escapeHtml(firstName);
   if (rawText === TELEGRAM_ACCESS_PASSWORD) {
     const newUser = await registerTelegramUser(strChatId, { username, firstName });
     return {
       method: "sendMessage",
       chat_id: chatId,
-      text: `\u2705 *Registration Successful, ${firstName}!*
+      text: `\u2705 <b>Registration Successful, ${safeFirstName}!</b>
 
-You have been granted *${newUser.remainingQuota} invitation codes*.
+You have been granted <b>${newUser.remainingQuota} invitation codes</b>.
 
-\u{1F449} Send *code* or tap the button below to get an invitation code.`,
-      parse_mode: "Markdown",
+\u{1F449} Send <b>code</b> or tap the button below to get an invitation code.`,
+      parse_mode: "HTML",
       reply_markup: authKeyboard
     };
   }
@@ -65134,10 +65137,10 @@ You have been granted *${newUser.remainingQuota} invitation codes*.
     return {
       method: "sendMessage",
       chat_id: chatId,
-      text: `\u{1F44B} *Welcome, ${firstName}!*
+      text: `\u{1F44B} <b>Welcome, ${safeFirstName}!</b>
 
 Please enter the password to register and receive your invitation codes:`,
-      parse_mode: "Markdown"
+      parse_mode: "HTML"
     };
   }
   return {
@@ -65146,7 +65149,7 @@ Please enter the password to register and receive your invitation codes:`,
     text: `\u274C Incorrect password.
 
 Please enter the correct password to register:`,
-    parse_mode: "Markdown"
+    parse_mode: "HTML"
   };
 }
 async function getAllTelegramUsers() {
@@ -65175,17 +65178,17 @@ async function grantMoreCodesToTelegramUser(chatId, additionalQuota) {
     strChatId
   );
   const updated = await getTelegramUserByChatId(strChatId);
-  const notifyText = `\u{1F389} *Quota Updated!*
+  const notifyText = `\u{1F389} <b>Quota Updated!</b>
 
-Administration has granted you *+${additionalQuota} more invitation codes*.
+Administration has granted you <b>+${additionalQuota} more invitation codes</b>.
 
-\u{1F4CA} You now have *${updated?.remainingQuota}* codes available.
+\u{1F4CA} You now have <b>${updated?.remainingQuota}</b> codes available.
 
-Send *code* to generate a new invitation code.`;
+Send <b>code</b> to generate a new invitation code.`;
   await sendTelegramDirectMessage(strChatId, notifyText, {
     keyboard: [[{ text: "code" }]],
     resize_keyboard: true
-  });
+  }, "HTML");
   return { success: true, user: updated };
 }
 

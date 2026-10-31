@@ -2,7 +2,7 @@ import { prisma } from '../prisma';
 import { generateAdditionalCodes } from './adminReferralService';
 
 export const TELEGRAM_BOT_TOKEN =
-  process.env.TELEGRAM_BOT_TOKEN || '9207587440:AAHXQL1Krzbj8zRMqFXJypFiH-N_ePPghgk';
+  process.env.TELEGRAM_BOT_TOKEN || '9295985286:AAHb0EQFD-OMsd5bfrNgaPMTfkUDm4-Gph8';
 export const TELEGRAM_ACCESS_PASSWORD =
   process.env.TELEGRAM_ACCESS_PASSWORD || '9989GHYRT89';
 
@@ -53,18 +53,30 @@ export async function ensureTelegramUserTable(): Promise<void> {
 }
 
 /**
+ * Utility to escape HTML special characters for Telegram HTML parse mode.
+ */
+function escapeHtml(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
  * Sends an explicit HTTP message via Telegram Bot API (e.g. for user signup notifications).
  */
 export async function sendTelegramDirectMessage(
   chatId: number | string,
   text: string,
-  keyboard?: any
+  keyboard?: any,
+  parseMode: string = 'HTML'
 ): Promise<boolean> {
   try {
     const payload: any = {
       chat_id: chatId,
       text,
-      parse_mode: 'Markdown',
+      parse_mode: parseMode,
     };
     if (keyboard) {
       payload.reply_markup = keyboard;
@@ -275,9 +287,9 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
         chat_id: chatId,
         text:
           `You have already registered!\n\n` +
-          `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*\n\n` +
-          `👉 Send *code* to generate an invitation code.`,
-        parse_mode: 'Markdown',
+          `📊 Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>\n\n` +
+          `👉 Send <b>code</b> to generate an invitation code.`,
+        parse_mode: 'HTML',
         reply_markup: authKeyboard,
       };
     }
@@ -292,16 +304,16 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
             method: 'sendMessage',
             chat_id: chatId,
             text:
-              `⚠️ You have used all your *${result.totalQuota}* available codes.\n\n` +
+              `⚠️ You have used all your <b>${result.totalQuota}</b> available codes.\n\n` +
               `Please contact administration to grant you more referral codes.`,
-            parse_mode: 'Markdown',
+            parse_mode: 'HTML',
           };
         }
         return {
           method: 'sendMessage',
           chat_id: chatId,
           text: `Could not generate code at the moment. Please try again in a few seconds.`,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
         };
       }
 
@@ -309,11 +321,10 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
         method: 'sendMessage',
         chat_id: chatId,
         text:
-          `🎟️ *Your Invitation Code:*\n\n` +
-          `\`${result.code}\`\n\n` +
-          `📋 _(Tap code above to copy)_\n\n` +
-          `📊 *Remaining codes:* ${result.remainingQuota} / ${result.totalQuota}`,
-        parse_mode: 'Markdown',
+          `🎟️ <b>Your Invitation Code:</b>\n\n` +
+          `<b><code>${result.code}</code></b>\n\n` +
+          `📊 <b>Remaining codes:</b> ${result.remainingQuota} / ${result.totalQuota}`,
+        parse_mode: 'HTML',
         reply_markup: authKeyboard,
       };
     }
@@ -325,9 +336,9 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
         chat_id: chatId,
         text:
           `You are already registered!\n\n` +
-          `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*\n\n` +
-          `Send *code* to receive an invitation code.`,
-        parse_mode: 'Markdown',
+          `📊 Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>\n\n` +
+          `Send <b>code</b> to receive an invitation code.`,
+        parse_mode: 'HTML',
         reply_markup: authKeyboard,
       };
     }
@@ -337,9 +348,9 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
       method: 'sendMessage',
       chat_id: chatId,
       text:
-        `Send *code* to receive an invitation code.\n\n` +
-        `📊 Available codes: *${user.remainingQuota}* / *${user.totalQuota}*`,
-      parse_mode: 'Markdown',
+        `Send <b>code</b> to receive an invitation code.\n\n` +
+        `📊 Available codes: <b>${user.remainingQuota}</b> / <b>${user.totalQuota}</b>`,
+      parse_mode: 'HTML',
       reply_markup: authKeyboard,
     };
   }
@@ -347,6 +358,8 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
   // ==========================================
   // SCENARIO 2: USER IS NOT REGISTERED YET
   // ==========================================
+
+  const safeFirstName = escapeHtml(firstName);
 
   // A. User enters the correct password
   if (rawText === TELEGRAM_ACCESS_PASSWORD) {
@@ -356,10 +369,10 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
       method: 'sendMessage',
       chat_id: chatId,
       text:
-        `✅ *Registration Successful, ${firstName}!*\n\n` +
-        `You have been granted *${newUser.remainingQuota} invitation codes*.\n\n` +
-        `👉 Send *code* or tap the button below to get an invitation code.`,
-      parse_mode: 'Markdown',
+        `✅ <b>Registration Successful, ${safeFirstName}!</b>\n\n` +
+        `You have been granted <b>${newUser.remainingQuota} invitation codes</b>.\n\n` +
+        `👉 Send <b>code</b> or tap the button below to get an invitation code.`,
+      parse_mode: 'HTML',
       reply_markup: authKeyboard,
     };
   }
@@ -370,9 +383,9 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
       method: 'sendMessage',
       chat_id: chatId,
       text:
-        `👋 *Welcome, ${firstName}!*\n\n` +
+        `👋 <b>Welcome, ${safeFirstName}!</b>\n\n` +
         `Please enter the password to register and receive your invitation codes:`,
-      parse_mode: 'Markdown',
+      parse_mode: 'HTML',
     };
   }
 
@@ -383,7 +396,7 @@ export async function handleTelegramWebhookUpdate(update: any): Promise<any | nu
     text:
       `❌ Incorrect password.\n\n` +
       `Please enter the correct password to register:`,
-    parse_mode: 'Markdown',
+    parse_mode: 'HTML',
   };
 }
 
@@ -410,12 +423,13 @@ export async function notifyTelegramCodeUsed(
 
     const targetChatId = match[1];
 
-    const simpleMessage = `This invitation code \`${code.toLowerCase()}\` is used to create the account with the name of *${user.name}*.`;
+    const safeUserName = escapeHtml(user.name);
+    const simpleMessage = `This invitation code <b><code>${code.toLowerCase()}</code></b> is used to create the account with the name of <b>${safeUserName}</b>.`;
 
     await sendTelegramDirectMessage(targetChatId, simpleMessage, {
       keyboard: [[{ text: 'code' }]],
       resize_keyboard: true,
-    });
+    }, 'HTML');
   } catch (err) {
     console.error('Error notifying Telegram client of used code:', err);
   }
@@ -463,15 +477,15 @@ export async function grantMoreCodesToTelegramUser(
 
   // Notify client on Telegram about the quota increase
   const notifyText =
-    `🎉 *Quota Updated!*\n\n` +
-    `Administration has granted you *+${additionalQuota} more invitation codes*.\n\n` +
-    `📊 You now have *${updated?.remainingQuota}* codes available.\n\n` +
-    `Send *code* to generate a new invitation code.`;
+    `🎉 <b>Quota Updated!</b>\n\n` +
+    `Administration has granted you <b>+${additionalQuota} more invitation codes</b>.\n\n` +
+    `📊 You now have <b>${updated?.remainingQuota}</b> codes available.\n\n` +
+    `Send <b>code</b> to generate a new invitation code.`;
 
   await sendTelegramDirectMessage(strChatId, notifyText, {
     keyboard: [[{ text: 'code' }]],
     resize_keyboard: true,
-  });
+  }, 'HTML');
 
   return { success: true, user: updated! };
 }
