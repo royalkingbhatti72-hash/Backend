@@ -75908,13 +75908,23 @@ router6.get("/", requireAuth, async (req, res, next) => {
         Math.floor(availableBalance * eligiblePercent / 100)
       );
     }
+    const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
+    const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
+    const withdrawalNotice = currentLevel?.withdrawalNotice || (currentLevelNumber === 4 ? "Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward" : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
     res.json({
       withdrawals,
       withdrawalQuota: {
         completedLevelsCount,
+        currentLevelNumber,
+        withdrawalNotice,
         eligiblePercent,
         maxWithdrawableAmount,
-        availableBalance
+        availableBalance,
+        allLevelNotices: levels.map((l) => ({
+          levelNumber: l.levelNumber,
+          title: l.title,
+          notice: l.withdrawalNotice || ""
+        }))
       }
     });
   } catch (err) {
@@ -77387,8 +77397,9 @@ router11.put("/levels/:levelId", requireAdmin, async (req, res, next) => {
     const schema = external_exports.object({
       title: external_exports.string().min(2),
       description: external_exports.string().min(5),
-      completionReward: external_exports.number().nonnegative(),
-      status: external_exports.enum(["ACTIVE", "DISABLED"])
+      completionReward: external_exports.number().nonnegative().optional().default(0),
+      status: external_exports.enum(["ACTIVE", "DISABLED"]),
+      withdrawalNotice: external_exports.string().optional().nullable()
     });
     const validated = schema.parse(req.body);
     const existing = await prisma.level.findUnique({ where: { id: levelId } });

@@ -54,13 +54,27 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       );
     }
 
+    const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
+    const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
+    const withdrawalNotice = currentLevel?.withdrawalNotice ||
+      (currentLevelNumber === 4
+        ? 'Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward'
+        : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
+
     res.json({
       withdrawals,
       withdrawalQuota: {
         completedLevelsCount,
+        currentLevelNumber,
+        withdrawalNotice,
         eligiblePercent,
         maxWithdrawableAmount,
         availableBalance,
+        allLevelNotices: levels.map((l) => ({
+          levelNumber: l.levelNumber,
+          title: l.title,
+          notice: l.withdrawalNotice || '',
+        })),
       },
     });
   } catch (err) {

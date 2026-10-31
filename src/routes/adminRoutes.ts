@@ -889,8 +889,9 @@ router.put('/levels/:levelId', requireAdmin, async (req: AdminAuthRequest, res: 
     const schema = z.object({
       title: z.string().min(2),
       description: z.string().min(5),
-      completionReward: z.number().nonnegative(),
+      completionReward: z.number().nonnegative().optional().default(0),
       status: z.enum(['ACTIVE', 'DISABLED']),
+      withdrawalNotice: z.string().optional().nullable(),
     });
 
     const validated = schema.parse(req.body);
