@@ -99,6 +99,7 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
       pendingSpinsEntitlement,
       pendingDeposits,
       pendingWithdrawals,
+      pendingIdentities,
     ] = await Promise.all([
       prisma.taskSubmission.count({ where: { status: 'PENDING' } }),
       prisma.spinHistory.count({ where: { rewardStatus: 'PENDING' } }),
@@ -112,10 +113,11 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
           ],
         },
       }),
+      prisma.identityVerification.count({ where: { status: 'PENDING' } }),
     ]);
 
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
-    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals;
+    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals + pendingIdentities;
 
     res.json({
       success: true,
@@ -126,6 +128,7 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
         spins: pendingSpins,
         deposits: pendingDeposits,
         withdrawals: pendingWithdrawals,
+        identities: pendingIdentities,
       },
     });
   } catch (error) {
@@ -146,6 +149,7 @@ router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Respon
       pendingSubmissions,
       pendingDeposits,
       pendingWithdrawals,
+      pendingIdentities,
       approvedDepositsSum,
       paidWithdrawalsSum,
       approvedRewardsSum,
@@ -159,6 +163,7 @@ router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Respon
       prisma.taskSubmission.count({ where: { status: 'PENDING' } }),
       prisma.depositRequest.count({ where: { status: 'PENDING' } }),
       prisma.withdrawalRequest.count({ where: { approvalStatus: 'PENDING' } }),
+      prisma.identityVerification.count({ where: { status: 'PENDING' } }),
       prisma.depositRequest.aggregate({
         where: { status: 'APPROVED' },
         _sum: { amount: true },
@@ -194,6 +199,7 @@ router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Respon
         pendingSubmissions,
         pendingDeposits,
         pendingWithdrawals,
+        pendingIdentities,
         totalDepositsAmount: approvedDepositsSum._sum.amount || 0,
         totalPaidWithdrawalsAmount: paidWithdrawalsSum._sum.amount || 0,
         totalApprovedRewardsAmount: approvedRewardsSum._sum.amount || 0,
@@ -298,6 +304,7 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
         where,
         include: {
           wallet: true,
+          identityVerification: { select: { status: true, cnicNumber: true } },
           _count: {
             select: {
               taskProgress: { where: { status: 'APPROVED' } },
@@ -324,6 +331,9 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       creditPoints: u.wallet?.creditPoints ?? 100,
       approvedTasksCount: u._count.taskProgress,
       referralsCount: u._count.referrals,
+      isVerified: (u as any).identityVerification?.status === 'APPROVED',
+      identityStatus: (u as any).identityVerification?.status || 'UNVERIFIED',
+      cnicNumber: (u as any).identityVerification?.cnicNumber || null,
     }));
 
     res.json({
@@ -359,6 +369,7 @@ router.get('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Re
         spinEntitlements: { include: { assignedPrize: true } },
         spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 50 },
         submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 20 },
+        identityVerification: true,
       },
     });
 
@@ -2378,6 +2389,276 @@ router.post('/telegram-users/:chatId/grant', requireAdmin, async (req: AdminAuth
       message: `Successfully granted +${quotaToAdd} invitation codes!`,
       user: result.user,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 16. USER IDENTITY VERIFICATION (KYC) DESK
+// ==========================================
+
+router.get('/identity-verifications', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { status, search, page = '1', limit = '20' } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: any = {};
+    if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status as string)) {
+      where.status = status;
+    }
+
+    if (search) {
+      const q = String(search).trim();
+      where.OR = [
+        { user: { name: { contains: q, mode: 'insensitive' } } },
+        { user: { phone: { contains: q } } },
+        { cnicNumber: { contains: q } },
+        { fullName: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const [verifications, total] = await Promise.all([
+      prisma.identityVerification.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              accountStatus: true,
+              createdAt: true,
+            },
+          },
+        },
+        orderBy: [
+          { status: 'asc' }, // PENDING first
+          { submittedAt: 'desc' },
+        ],
+        skip,
+        take: limitNum,
+      }),
+      prisma.identityVerification.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limitNum) || 1;
+
+    res.json({
+      verifications,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/identity-verifications/:id', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const verification = await prisma.identityVerification.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            accountStatus: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!verification) {
+      return res.status(404).json({ error: 'Identity verification request not found' });
+    }
+
+    res.json({ verification });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/identity-verifications/:id/review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const reviewSchema = z.object({
+      action: z.enum(['APPROVE', 'REJECT']),
+      cnicNumber: z.string().optional(),
+      fullName: z.string().optional(),
+      gender: z.string().optional(),
+      dateOfBirth: z.string().optional(),
+      reviewNotes: z.string().optional(),
+      rejectionReason: z.string().optional(),
+    });
+
+    const validated = reviewSchema.parse(req.body);
+
+    const existing = await prisma.identityVerification.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Identity verification request not found' });
+    }
+
+    if (validated.action === 'APPROVE') {
+      if (!validated.cnicNumber?.trim()) {
+        return res.status(400).json({ error: 'ID Card / CNIC Number is required for approval' });
+      }
+      if (!validated.fullName?.trim()) {
+        return res.status(400).json({ error: 'Full Legal Name on ID Card is required for approval' });
+      }
+      if (!validated.gender?.trim()) {
+        return res.status(400).json({ error: 'Gender is required for approval' });
+      }
+      if (!validated.dateOfBirth?.trim()) {
+        return res.status(400).json({ error: 'Date of Birth is required for approval' });
+      }
+
+      const parsedDob = new Date(validated.dateOfBirth.trim());
+      if (isNaN(parsedDob.getTime())) {
+        return res.status(400).json({ error: 'Valid Date of Birth (YYYY-MM-DD) is required' });
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const record = await tx.identityVerification.update({
+          where: { id },
+          data: {
+            status: 'APPROVED',
+            cnicNumber: validated.cnicNumber!.trim(),
+            fullName: validated.fullName!.trim(),
+            gender: validated.gender!.trim(),
+            dateOfBirth: parsedDob,
+            reviewerId: req.admin!.id,
+            reviewerName: req.admin!.username,
+            reviewNotes: validated.reviewNotes?.trim() || null,
+            rejectionReason: null,
+            reviewedAt: new Date(),
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                accountStatus: true,
+              },
+            },
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: existing.userId,
+            title: 'Identity Verified Successfully! ✅',
+            message: `Your identity has been verified! Full Name: ${record.fullName}, CNIC: ${record.cnicNumber}.`,
+            notificationType: 'SYSTEM_ALERT',
+          },
+        });
+
+        return record;
+      });
+
+      await logAdminAction({
+        adminId: req.admin!.id,
+        adminUsername: req.admin!.username,
+        action: 'IDENTITY_VERIFICATION_APPROVED',
+        entityType: 'IdentityVerification',
+        entityId: id,
+        previousState: { status: existing.status },
+        newState: {
+          status: 'APPROVED',
+          cnicNumber: updated.cnicNumber,
+          fullName: updated.fullName,
+          gender: updated.gender,
+          dateOfBirth: updated.dateOfBirth,
+        },
+        reason: validated.reviewNotes || 'Admin approved user identity verification',
+        ipAddress: req.ip,
+      });
+
+      sendUserLiveCommand(existing.userId, 'identity_updated', {
+        status: 'APPROVED',
+        cnicNumber: updated.cnicNumber,
+        fullName: updated.fullName,
+      });
+
+      return res.json({
+        message: 'Identity verification approved successfully! Client profile has been updated.',
+        verification: updated,
+      });
+    } else {
+      // REJECT
+      const reason = validated.rejectionReason?.trim() || 'ID card photos were unclear or invalid. Please re-upload clear photos.';
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const record = await tx.identityVerification.update({
+          where: { id },
+          data: {
+            status: 'REJECTED',
+            rejectionReason: reason,
+            reviewerId: req.admin!.id,
+            reviewerName: req.admin!.username,
+            reviewNotes: validated.reviewNotes?.trim() || null,
+            reviewedAt: new Date(),
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                accountStatus: true,
+              },
+            },
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: existing.userId,
+            title: 'Identity Verification Rejected ⚠️',
+            message: `Your identity verification could not be approved: "${reason}". Please submit clear front and back ID photos.`,
+            notificationType: 'SYSTEM_ALERT',
+          },
+        });
+
+        return record;
+      });
+
+      await logAdminAction({
+        adminId: req.admin!.id,
+        adminUsername: req.admin!.username,
+        action: 'IDENTITY_VERIFICATION_REJECTED',
+        entityType: 'IdentityVerification',
+        entityId: id,
+        previousState: { status: existing.status },
+        newState: { status: 'REJECTED', rejectionReason: reason },
+        reason: reason,
+        ipAddress: req.ip,
+      });
+
+      sendUserLiveCommand(existing.userId, 'identity_updated', {
+        status: 'REJECTED',
+        rejectionReason: reason,
+      });
+
+      return res.json({
+        message: 'Identity verification has been rejected. The user has been notified.',
+        verification: updated,
+      });
+    }
   } catch (err) {
     next(err);
   }

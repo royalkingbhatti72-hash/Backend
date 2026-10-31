@@ -222,6 +222,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response, next
         referredBy: {
           select: { name: true, phone: true },
         },
+        identityVerification: true,
       },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });

@@ -19,6 +19,7 @@ import notificationRoutes from './routes/notificationRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import adminRoutes from './routes/adminRoutes';
 import telegramRoutes from './routes/telegramRoutes';
+import identityRoutes from './routes/identityRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
 import { prisma } from './prisma';
@@ -164,6 +165,8 @@ export function createApp() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/telegram', telegramRoutes);
   app.use('/telegram', telegramRoutes);
+  app.use('/api/user/identity', identityRoutes);
+  app.use('/api/identity', identityRoutes);
 
   // Root & Health check endpoints
   app.get(['/api', '/api/index'], (req, res) => {
@@ -205,11 +208,11 @@ export function createApp() {
   // Graceful fallback for stale or missing assets
   app.use('/assets', (req, res, next) => {
     if (req.method === 'GET' || req.method === 'HEAD') {
-      if (req.path.endsWith('.js') && !req.path.includes('main-iEIhMfQT.js')) {
-        return res.redirect(302, '/assets/main-iEIhMfQT.js');
+      if (req.path.endsWith('.js') && !req.path.includes('main-Bp5GhFNi.js')) {
+        return res.redirect(302, '/assets/main-Bp5GhFNi.js');
       }
-      if (req.path.endsWith('.css') && !req.path.includes('main-C_ayEacy.css')) {
-        return res.redirect(302, '/assets/main-C_ayEacy.css');
+      if (req.path.endsWith('.css') && !req.path.includes('main-BEa2Vcih.css')) {
+        return res.redirect(302, '/assets/main-BEa2Vcih.css');
       }
       return res.status(404).end();
     }

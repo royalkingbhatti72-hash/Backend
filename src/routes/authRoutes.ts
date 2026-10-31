@@ -246,6 +246,7 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response, next) => 
         mustChangePassword: true,
         createdAt: true,
         wallet: true,
+        identityVerification: true,
       },
     });
 

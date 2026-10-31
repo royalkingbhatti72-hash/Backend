@@ -21351,27 +21351,27 @@ var require_router = __commonJS({
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var methods = METHODS.map((method) => method.toLowerCase());
-    module.exports = Router13;
+    module.exports = Router14;
     module.exports.Route = Route;
-    function Router13(options) {
-      if (!(this instanceof Router13)) {
-        return new Router13(options);
+    function Router14(options) {
+      if (!(this instanceof Router14)) {
+        return new Router14(options);
       }
       const opts = options || {};
-      function router13(req, res, next) {
-        router13.handle(req, res, next);
+      function router14(req, res, next) {
+        router14.handle(req, res, next);
       }
-      Object.setPrototypeOf(router13, this);
-      router13.caseSensitive = opts.caseSensitive;
-      router13.mergeParams = opts.mergeParams;
-      router13.params = {};
-      router13.strict = opts.strict;
-      router13.stack = [];
-      return router13;
+      Object.setPrototypeOf(router14, this);
+      router14.caseSensitive = opts.caseSensitive;
+      router14.mergeParams = opts.mergeParams;
+      router14.params = {};
+      router14.strict = opts.strict;
+      router14.stack = [];
+      return router14;
     }
-    Router13.prototype = function() {
+    Router14.prototype = function() {
     };
-    Router13.prototype.param = function param(name, fn) {
+    Router14.prototype.param = function param(name, fn) {
       if (!name) {
         throw new TypeError("argument name is required");
       }
@@ -21391,7 +21391,7 @@ var require_router = __commonJS({
       params.push(fn);
       return this;
     };
-    Router13.prototype.handle = function handle(req, res, callback) {
+    Router14.prototype.handle = function handle(req, res, callback) {
       if (!callback) {
         throw new TypeError("argument callback is required");
       }
@@ -21518,7 +21518,7 @@ var require_router = __commonJS({
         }
       }
     };
-    Router13.prototype.use = function use(handler) {
+    Router14.prototype.use = function use(handler) {
       let offset = 0;
       let path6 = "/";
       if (typeof handler !== "function") {
@@ -21551,7 +21551,7 @@ var require_router = __commonJS({
       }
       return this;
     };
-    Router13.prototype.route = function route(path6) {
+    Router14.prototype.route = function route(path6) {
       const route2 = new Route(path6);
       const layer = new Layer(path6, {
         sensitive: this.caseSensitive,
@@ -21566,7 +21566,7 @@ var require_router = __commonJS({
       return route2;
     };
     methods.concat("all").forEach(function(method) {
-      Router13.prototype[method] = function(path6) {
+      Router14.prototype[method] = function(path6) {
         const route = this.route(path6);
         route[method].apply(route, slice.call(arguments, 1));
         return this;
@@ -21749,13 +21749,13 @@ var require_application = __commonJS({
     var compileTrust = require_utils3().compileTrust;
     var resolve = __require("node:path").resolve;
     var once = require_once();
-    var Router13 = require_router();
+    var Router14 = require_router();
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var app2 = exports = module.exports = {};
     var trustProxyDefaultSymbol = "@@symbol:trust_proxy_default";
     app2.init = function init() {
-      var router13 = null;
+      var router14 = null;
       this.cache = /* @__PURE__ */ Object.create(null);
       this.engines = /* @__PURE__ */ Object.create(null);
       this.settings = /* @__PURE__ */ Object.create(null);
@@ -21764,13 +21764,13 @@ var require_application = __commonJS({
         configurable: true,
         enumerable: true,
         get: function getrouter() {
-          if (router13 === null) {
-            router13 = new Router13({
+          if (router14 === null) {
+            router14 = new Router14({
               caseSensitive: this.enabled("case sensitive routing"),
               strict: this.enabled("strict routing")
             });
           }
-          return router13;
+          return router14;
         }
       });
     };
@@ -21841,15 +21841,15 @@ var require_application = __commonJS({
       if (fns.length === 0) {
         throw new TypeError("app.use() requires a middleware function");
       }
-      var router13 = this.router;
+      var router14 = this.router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router13.use(path6, fn2);
+          return router14.use(path6, fn2);
         }
         debug(".use app under %s", path6);
         fn2.mountpath = path6;
         fn2.parent = this;
-        router13.use(path6, function mounted_app(req, res, next) {
+        router14.use(path6, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             Object.setPrototypeOf(req, orig.request);
@@ -24438,7 +24438,7 @@ var require_express = __commonJS({
     var EventEmitter = __require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
-    var Router13 = require_router();
+    var Router14 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -24460,8 +24460,8 @@ var require_express = __commonJS({
     exports.application = proto;
     exports.request = req;
     exports.response = res;
-    exports.Route = Router13.Route;
-    exports.Router = Router13;
+    exports.Route = Router14.Route;
+    exports.Router = Router14;
     exports.json = bodyParser.json;
     exports.raw = bodyParser.raw;
     exports.static = require_serve_static();
@@ -43325,7 +43325,7 @@ import path5 from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 
 // src/app.ts
-var import_express13 = __toESM(require_express2(), 1);
+var import_express14 = __toESM(require_express2(), 1);
 var import_cors = __toESM(require_lib3(), 1);
 var import_morgan = __toESM(require_morgan(), 1);
 import path4 from "path";
@@ -65534,7 +65534,8 @@ router.get("/me", requireAuth, async (req, res, next) => {
         accountStatus: true,
         mustChangePassword: true,
         createdAt: true,
-        wallet: true
+        wallet: true,
+        identityVerification: true
       }
     });
     if (!user) {
@@ -65738,7 +65739,8 @@ router2.get("/profile", requireAuth, async (req, res, next) => {
         wallet: true,
         referredBy: {
           select: { name: true, phone: true }
-        }
+        },
+        identityVerification: true
       }
     });
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -77277,7 +77279,8 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
       pendingSpinsHistory,
       pendingSpinsEntitlement,
       pendingDeposits,
-      pendingWithdrawals
+      pendingWithdrawals,
+      pendingIdentities
     ] = await Promise.all([
       prisma.taskSubmission.count({ where: { status: "PENDING" } }),
       prisma.spinHistory.count({ where: { rewardStatus: "PENDING" } }),
@@ -77290,10 +77293,11 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
             { approvalStatus: "APPROVED", paymentStatus: "NOT_SENT" }
           ]
         }
-      })
+      }),
+      prisma.identityVerification.count({ where: { status: "PENDING" } })
     ]);
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
-    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals;
+    const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals + pendingIdentities;
     res.json({
       success: true,
       counts: {
@@ -77302,7 +77306,8 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
         submissions: pendingTasks,
         spins: pendingSpins,
         deposits: pendingDeposits,
-        withdrawals: pendingWithdrawals
+        withdrawals: pendingWithdrawals,
+        identities: pendingIdentities
       }
     });
   } catch (error62) {
@@ -77318,6 +77323,7 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
       pendingSubmissions,
       pendingDeposits,
       pendingWithdrawals,
+      pendingIdentities,
       approvedDepositsSum,
       paidWithdrawalsSum,
       approvedRewardsSum,
@@ -77331,6 +77337,7 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
       prisma.taskSubmission.count({ where: { status: "PENDING" } }),
       prisma.depositRequest.count({ where: { status: "PENDING" } }),
       prisma.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } }),
+      prisma.identityVerification.count({ where: { status: "PENDING" } }),
       prisma.depositRequest.aggregate({
         where: { status: "APPROVED" },
         _sum: { amount: true }
@@ -77365,6 +77372,7 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
         pendingSubmissions,
         pendingDeposits,
         pendingWithdrawals,
+        pendingIdentities,
         totalDepositsAmount: approvedDepositsSum._sum.amount || 0,
         totalPaidWithdrawalsAmount: paidWithdrawalsSum._sum.amount || 0,
         totalApprovedRewardsAmount: approvedRewardsSum._sum.amount || 0,
@@ -77454,6 +77462,7 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
         where,
         include: {
           wallet: true,
+          identityVerification: { select: { status: true, cnicNumber: true } },
           _count: {
             select: {
               taskProgress: { where: { status: "APPROVED" } },
@@ -77478,7 +77487,10 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
       walletBalance: u.wallet?.availableBalance || 0,
       creditPoints: u.wallet?.creditPoints ?? 100,
       approvedTasksCount: u._count.taskProgress,
-      referralsCount: u._count.referrals
+      referralsCount: u._count.referrals,
+      isVerified: u.identityVerification?.status === "APPROVED",
+      identityStatus: u.identityVerification?.status || "UNVERIFIED",
+      cnicNumber: u.identityVerification?.cnicNumber || null
     }));
     res.json({
       users: formattedUsers,
@@ -77511,7 +77523,8 @@ router11.get("/users/:userId", requireAdmin, async (req, res, next) => {
         transactions: { orderBy: { createdAt: "desc" }, take: 50 },
         spinEntitlements: { include: { assignedPrize: true } },
         spinHistories: { include: { prize: true }, orderBy: { createdAt: "desc" }, take: 50 },
-        submissions: { include: { task: true }, orderBy: { createdAt: "desc" }, take: 20 }
+        submissions: { include: { task: true }, orderBy: { createdAt: "desc" }, take: 20 },
+        identityVerification: true
       }
     });
     if (!user) {
@@ -79210,6 +79223,245 @@ router11.post("/telegram-users/:chatId/grant", requireAdmin, async (req, res, ne
     next(err);
   }
 });
+router11.get("/identity-verifications", requireAdmin, async (req, res, next) => {
+  try {
+    const { status, search, page = "1", limit = "20" } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+    const where = {};
+    if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status)) {
+      where.status = status;
+    }
+    if (search) {
+      const q = String(search).trim();
+      where.OR = [
+        { user: { name: { contains: q, mode: "insensitive" } } },
+        { user: { phone: { contains: q } } },
+        { cnicNumber: { contains: q } },
+        { fullName: { contains: q, mode: "insensitive" } }
+      ];
+    }
+    const [verifications, total] = await Promise.all([
+      prisma.identityVerification.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              accountStatus: true,
+              createdAt: true
+            }
+          }
+        },
+        orderBy: [
+          { status: "asc" },
+          // PENDING first
+          { submittedAt: "desc" }
+        ],
+        skip,
+        take: limitNum
+      }),
+      prisma.identityVerification.count({ where })
+    ]);
+    const totalPages = Math.ceil(total / limitNum) || 1;
+    res.json({
+      verifications,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.get("/identity-verifications/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const verification = await prisma.identityVerification.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            accountStatus: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+    if (!verification) {
+      return res.status(404).json({ error: "Identity verification request not found" });
+    }
+    res.json({ verification });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.put("/identity-verifications/:id/review", requireAdmin, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const reviewSchema = external_exports.object({
+      action: external_exports.enum(["APPROVE", "REJECT"]),
+      cnicNumber: external_exports.string().optional(),
+      fullName: external_exports.string().optional(),
+      gender: external_exports.string().optional(),
+      dateOfBirth: external_exports.string().optional(),
+      reviewNotes: external_exports.string().optional(),
+      rejectionReason: external_exports.string().optional()
+    });
+    const validated = reviewSchema.parse(req.body);
+    const existing = await prisma.identityVerification.findUnique({
+      where: { id },
+      include: { user: true }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Identity verification request not found" });
+    }
+    if (validated.action === "APPROVE") {
+      if (!validated.cnicNumber?.trim()) {
+        return res.status(400).json({ error: "ID Card / CNIC Number is required for approval" });
+      }
+      if (!validated.fullName?.trim()) {
+        return res.status(400).json({ error: "Full Legal Name on ID Card is required for approval" });
+      }
+      if (!validated.gender?.trim()) {
+        return res.status(400).json({ error: "Gender is required for approval" });
+      }
+      if (!validated.dateOfBirth?.trim()) {
+        return res.status(400).json({ error: "Date of Birth is required for approval" });
+      }
+      const parsedDob = new Date(validated.dateOfBirth.trim());
+      if (isNaN(parsedDob.getTime())) {
+        return res.status(400).json({ error: "Valid Date of Birth (YYYY-MM-DD) is required" });
+      }
+      const updated = await prisma.$transaction(async (tx) => {
+        const record2 = await tx.identityVerification.update({
+          where: { id },
+          data: {
+            status: "APPROVED",
+            cnicNumber: validated.cnicNumber.trim(),
+            fullName: validated.fullName.trim(),
+            gender: validated.gender.trim(),
+            dateOfBirth: parsedDob,
+            reviewerId: req.admin.id,
+            reviewerName: req.admin.username,
+            reviewNotes: validated.reviewNotes?.trim() || null,
+            rejectionReason: null,
+            reviewedAt: /* @__PURE__ */ new Date()
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                accountStatus: true
+              }
+            }
+          }
+        });
+        await tx.notification.create({
+          data: {
+            userId: existing.userId,
+            title: "Identity Verified Successfully! \u2705",
+            message: `Your identity has been verified! Full Name: ${record2.fullName}, CNIC: ${record2.cnicNumber}.`,
+            notificationType: "SYSTEM_ALERT"
+          }
+        });
+        return record2;
+      });
+      await logAdminAction({
+        adminId: req.admin.id,
+        adminUsername: req.admin.username,
+        action: "IDENTITY_VERIFICATION_APPROVED",
+        entityType: "IdentityVerification",
+        entityId: id,
+        previousState: { status: existing.status },
+        newState: {
+          status: "APPROVED",
+          cnicNumber: updated.cnicNumber,
+          fullName: updated.fullName,
+          gender: updated.gender,
+          dateOfBirth: updated.dateOfBirth
+        },
+        reason: validated.reviewNotes || "Admin approved user identity verification",
+        ipAddress: req.ip
+      });
+      sendUserLiveCommand(existing.userId, "identity_updated", {
+        status: "APPROVED",
+        cnicNumber: updated.cnicNumber,
+        fullName: updated.fullName
+      });
+      return res.json({
+        message: "Identity verification approved successfully! Client profile has been updated.",
+        verification: updated
+      });
+    } else {
+      const reason = validated.rejectionReason?.trim() || "ID card photos were unclear or invalid. Please re-upload clear photos.";
+      const updated = await prisma.$transaction(async (tx) => {
+        const record2 = await tx.identityVerification.update({
+          where: { id },
+          data: {
+            status: "REJECTED",
+            rejectionReason: reason,
+            reviewerId: req.admin.id,
+            reviewerName: req.admin.username,
+            reviewNotes: validated.reviewNotes?.trim() || null,
+            reviewedAt: /* @__PURE__ */ new Date()
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                accountStatus: true
+              }
+            }
+          }
+        });
+        await tx.notification.create({
+          data: {
+            userId: existing.userId,
+            title: "Identity Verification Rejected \u26A0\uFE0F",
+            message: `Your identity verification could not be approved: "${reason}". Please submit clear front and back ID photos.`,
+            notificationType: "SYSTEM_ALERT"
+          }
+        });
+        return record2;
+      });
+      await logAdminAction({
+        adminId: req.admin.id,
+        adminUsername: req.admin.username,
+        action: "IDENTITY_VERIFICATION_REJECTED",
+        entityType: "IdentityVerification",
+        entityId: id,
+        previousState: { status: existing.status },
+        newState: { status: "REJECTED", rejectionReason: reason },
+        reason,
+        ipAddress: req.ip
+      });
+      sendUserLiveCommand(existing.userId, "identity_updated", {
+        status: "REJECTED",
+        rejectionReason: reason
+      });
+      return res.json({
+        message: "Identity verification has been rejected. The user has been notified.",
+        verification: updated
+      });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 var adminRoutes_default = router11;
 
 // src/routes/telegramRoutes.ts
@@ -79260,6 +79512,79 @@ router12.get("/info", async (req, res) => {
   }
 });
 var telegramRoutes_default = router12;
+
+// src/routes/identityRoutes.ts
+var import_express13 = __toESM(require_express2(), 1);
+var router13 = (0, import_express13.Router)();
+var identitySubmissionSchema = external_exports.object({
+  idFrontImage: external_exports.string().min(50, "Front image of ID card is required"),
+  idBackImage: external_exports.string().min(50, "Back image of ID card is required")
+});
+router13.get("/", requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const record2 = await prisma.identityVerification.findUnique({
+      where: { userId }
+    });
+    res.json({
+      identityVerification: record2,
+      isVerified: record2?.status === "APPROVED",
+      status: record2?.status || "UNVERIFIED"
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router13.post("/", requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { idFrontImage, idBackImage } = identitySubmissionSchema.parse(req.body);
+    const existing = await prisma.identityVerification.findUnique({
+      where: { userId }
+    });
+    if (existing && existing.status === "APPROVED") {
+      return res.status(400).json({
+        error: "Your identity has already been verified and approved."
+      });
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const record2 = await tx.identityVerification.upsert({
+        where: { userId },
+        create: {
+          userId,
+          idFrontImage,
+          idBackImage,
+          status: "PENDING",
+          submittedAt: /* @__PURE__ */ new Date()
+        },
+        update: {
+          idFrontImage,
+          idBackImage,
+          status: "PENDING",
+          rejectionReason: null,
+          reviewNotes: null,
+          submittedAt: /* @__PURE__ */ new Date()
+        }
+      });
+      await tx.notification.create({
+        data: {
+          userId,
+          title: "Identity Verification Submitted \u{1FAAA}",
+          message: "Your ID card images have been received and are pending compliance review. Verification typically takes 1\u20132 hours.",
+          notificationType: "SYSTEM_ALERT"
+        }
+      });
+      return record2;
+    });
+    res.status(200).json({
+      message: "Identity verification submitted successfully! Our compliance team will review your ID card shortly.",
+      identityVerification: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+var identityRoutes_default = router13;
 
 // src/middleware/errorHandler.ts
 function errorHandler(err, req, res, next) {
@@ -79314,8 +79639,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-iEIhMfQT.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-C_ayEacy.css">
+    <script type="module" crossorigin src="/assets/main-Bp5GhFNi.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-BEa2Vcih.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -79327,7 +79652,7 @@ function getAdminSpaHtml() {
 var __filename3 = fileURLToPath3(import.meta.url);
 var __dirname3 = path4.dirname(__filename3);
 function createApp() {
-  const app2 = (0, import_express13.default)();
+  const app2 = (0, import_express14.default)();
   app2.use((req, res, next) => {
     const origin = req.headers.origin || "*";
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -79348,8 +79673,8 @@ function createApp() {
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "X-Api-Key"]
   }));
-  app2.use(import_express13.default.json());
-  app2.use(import_express13.default.urlencoded({ extended: true }));
+  app2.use(import_express14.default.json());
+  app2.use(import_express14.default.urlencoded({ extended: true }));
   if (process.env.NODE_ENV !== "test") {
     app2.use((0, import_morgan.default)("dev"));
   }
@@ -79425,6 +79750,8 @@ function createApp() {
   app2.use("/api/admin", adminRoutes_default);
   app2.use("/api/telegram", telegramRoutes_default);
   app2.use("/telegram", telegramRoutes_default);
+  app2.use("/api/user/identity", identityRoutes_default);
+  app2.use("/api/identity", identityRoutes_default);
   app2.get(["/api", "/api/index"], (req, res) => {
     res.json({
       name: "Earn Street API Server",
@@ -79450,19 +79777,19 @@ function createApp() {
   const backendAssetsDir = path4.resolve(__dirname3, "../assets");
   const rootAssetsDir = path4.resolve(process.cwd(), "assets");
   const rootPublicAssetsDir = path4.resolve(process.cwd(), "public/assets");
-  app2.use("/assets", import_express13.default.static(path4.join(publicDir, "assets")));
-  app2.use("/assets", import_express13.default.static(backendAssetsDir));
-  app2.use("/assets", import_express13.default.static(rootPublicAssetsDir));
-  app2.use("/assets", import_express13.default.static(rootAssetsDir));
-  app2.use(import_express13.default.static(publicDir));
-  app2.use(import_express13.default.static(path4.resolve(process.cwd(), "public")));
+  app2.use("/assets", import_express14.default.static(path4.join(publicDir, "assets")));
+  app2.use("/assets", import_express14.default.static(backendAssetsDir));
+  app2.use("/assets", import_express14.default.static(rootPublicAssetsDir));
+  app2.use("/assets", import_express14.default.static(rootAssetsDir));
+  app2.use(import_express14.default.static(publicDir));
+  app2.use(import_express14.default.static(path4.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-iEIhMfQT.js")) {
-        return res.redirect(302, "/assets/main-iEIhMfQT.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-Bp5GhFNi.js")) {
+        return res.redirect(302, "/assets/main-Bp5GhFNi.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-C_ayEacy.css")) {
-        return res.redirect(302, "/assets/main-C_ayEacy.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-BEa2Vcih.css")) {
+        return res.redirect(302, "/assets/main-BEa2Vcih.css");
       }
       return res.status(404).end();
     }
