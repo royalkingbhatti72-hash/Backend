@@ -66026,7 +66026,8 @@ var taskProgressionService = {
       userSubmissionsList,
       wallet,
       currentLevelProgressRecords,
-      currentLevelSubmissions
+      currentLevelSubmissions,
+      userWithdrawalsList
     ] = await Promise.all([
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },
@@ -66060,6 +66061,10 @@ var taskProgressionService = {
           task: { levelId: level.id }
         },
         orderBy: { createdAt: "desc" }
+      }),
+      prisma.withdrawalRequest.findMany({
+        where: { userId, approvalStatus: { in: ["PENDING", "APPROVED"] } },
+        select: { id: true, notes: true, approvalStatus: true }
       })
     ]);
     const approvedTasksByLevelId = /* @__PURE__ */ new Map();
@@ -66095,11 +66100,12 @@ var taskProgressionService = {
     const l2Completed = l1Completed && (levelStatsByNumber.get(2)?.isCompleted || false);
     const l3Completed = l2Completed && (levelStatsByNumber.get(3)?.isCompleted || false);
     const isLevel4Unlocked = l3Completed;
+    const hasWithdrawnLevel1 = userWithdrawalsList.length > 0;
     let isLevelUnlocked = false;
     if (levelNumber === 1) {
       isLevelUnlocked = true;
     } else if (levelNumber === 2) {
-      isLevelUnlocked = l1Completed;
+      isLevelUnlocked = l1Completed && hasWithdrawnLevel1;
     } else if (levelNumber === 3) {
       isLevelUnlocked = l2Completed;
     } else {
@@ -66109,13 +66115,21 @@ var taskProgressionService = {
     let task1LockMessage = "";
     if (!isLevelUnlocked) {
       isTask1Eligible = false;
-      task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
+      if (levelNumber === 2 && l1Completed && !hasWithdrawnLevel1) {
+        task1LockMessage = "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.";
+      } else {
+        task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
+      }
     } else if (levelNumber === 1) {
       isTask1Eligible = true;
     } else if (levelNumber === 2) {
-      isTask1Eligible = l1Completed;
+      isTask1Eligible = l1Completed && hasWithdrawnLevel1;
       if (!isTask1Eligible) {
-        task1LockMessage = "Complete all tasks in Level 1 first to unlock Level 2 tasks.";
+        if (!l1Completed) {
+          task1LockMessage = "Complete all tasks in Level 1 first to unlock Level 2 tasks.";
+        } else {
+          task1LockMessage = "You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.";
+        }
       }
     } else if (levelNumber === 3) {
       isTask1Eligible = l2Completed;
@@ -66151,7 +66165,7 @@ var taskProgressionService = {
           levelId: task.levelId,
           taskNumber: task.taskNumber,
           title: hideDetails ? `Locked Task #${task.taskNumber}` : task.title,
-          description: hideDetails ? `Complete Level ${level.levelNumber - 1} to unlock this level and view task details.` : task.description,
+          description: hideDetails ? level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1 ? "Withdraw your total account balance from Level 1 first to unlock Level 2 tasks." : `Complete Level ${level.levelNumber - 1} to unlock this level and view task details.` : task.description,
           taskType: hideDetails ? "Locked" : task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
           rewardAmount: hideDetails ? 0 : task.rewardAmount,
           creditPoints: 0,
@@ -66161,7 +66175,7 @@ var taskProgressionService = {
           status: task.status,
           userStatus: "LOCKED",
           isPaidUnlocked: false,
-          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
+          lockMessage: level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1 ? "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks." : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
           instructions: null,
           protectedUrl: null,
           submissionInstructions: null,
@@ -75662,7 +75676,7 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     await syncDatasetTasksToDatabase();
-    const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
+    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: "asc" } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: "APPROVED" },
@@ -75674,6 +75688,10 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
       prisma.taskSubmission.findMany({
         where: { userId, status: "APPROVED" },
         select: { task: { select: { levelId: true, id: true } } }
+      }),
+      prisma.withdrawalRequest.findMany({
+        where: { userId, approvalStatus: { in: ["PENDING", "APPROVED"] } },
+        select: { id: true, notes: true }
       })
     ]);
     const approvedTasksByLevel = /* @__PURE__ */ new Map();
@@ -75709,13 +75727,18 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
     const level2Completed = level1Completed && (levelStats.get(2)?.isCompleted || false);
     const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
     const isLevel4Unlocked = level3Completed;
+    const hasWithdrawnLevel1 = userWithdrawals.length > 0;
     const levelsWithProgress = levels.map((lvl) => {
       const stats = levelStats.get(lvl.levelNumber);
       let isUnlocked = false;
+      let lockReason = null;
       if (lvl.levelNumber === 1) {
         isUnlocked = true;
       } else if (lvl.levelNumber === 2) {
-        isUnlocked = level1Completed;
+        isUnlocked = level1Completed && hasWithdrawnLevel1;
+        if (!isUnlocked && level1Completed && !hasWithdrawnLevel1) {
+          lockReason = "You must withdraw your total account balance from Level 1 before Level 2 tasks unlock.";
+        }
       } else if (lvl.levelNumber === 3) {
         isUnlocked = level2Completed;
       } else {
@@ -75732,7 +75755,8 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
         totalCreditPoints: 0,
         approvedTaskCount: stats.approvedCount,
         isCompleted: stats.isCompleted,
-        isUnlocked
+        isUnlocked,
+        lockReason
       };
     });
     res.json({ levels: levelsWithProgress });
@@ -75819,6 +75843,11 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
     }
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
     if (!isLevelUnlocked) {
+      if (task.level.levelNumber === 2) {
+        return res.status(403).json({
+          error: "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks."
+        });
+      }
       return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. Complete all tasks in the previous level first.` });
     }
     const evaluated = tasks.find((t) => t.id === task.id || t.id === taskId || t.taskNumber === task.taskNumber);
@@ -75929,6 +75958,11 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     }
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
     if (!isLevelUnlocked) {
+      if (task.level.levelNumber === 2) {
+        return res.status(403).json({
+          error: "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can complete Level 2 tasks."
+        });
+      }
       return res.status(403).json({ error: "This level is locked" });
     }
     const evaluated = tasks.find((t) => t.id === task.id || t.id === taskId || t.taskNumber === task.taskNumber);
@@ -76256,6 +76290,174 @@ async function setLevelWithdrawalNotice(levelNumber, notice) {
   });
 }
 
+// src/services/withdrawalEligibilityService.ts
+async function getWithdrawalEligibility(userId) {
+  const wallet = await prisma.wallet.findUnique({
+    where: { userId },
+    select: { availableBalance: true }
+  });
+  const availableBalance = wallet?.availableBalance || 0;
+  const [levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] = await Promise.all([
+    prisma.level.findMany({
+      select: { id: true, levelNumber: true, requiredTaskCount: true },
+      orderBy: { levelNumber: "asc" }
+    }),
+    prisma.userTaskProgress.findMany({
+      where: { userId, status: "APPROVED" },
+      select: { task: { select: { levelId: true, id: true } } }
+    }),
+    prisma.userLevelProgress.findMany({
+      where: { userId },
+      select: { levelId: true, approvedTaskCount: true, completionStatus: true }
+    }),
+    prisma.taskSubmission.findMany({
+      where: { userId, status: "APPROVED" },
+      select: { task: { select: { levelId: true, id: true } } }
+    }),
+    prisma.withdrawalRequest.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" }
+    }),
+    getAllLevelWithdrawalNotices()
+  ]);
+  const approvedTasksByLevel = /* @__PURE__ */ new Map();
+  for (const p of userTaskProgress) {
+    if (p.task?.levelId && p.task?.id) {
+      if (!approvedTasksByLevel.has(p.task.levelId)) {
+        approvedTasksByLevel.set(p.task.levelId, /* @__PURE__ */ new Set());
+      }
+      approvedTasksByLevel.get(p.task.levelId).add(p.task.id);
+    }
+  }
+  for (const s of userSubmissions) {
+    if (s.task?.levelId && s.task?.id) {
+      if (!approvedTasksByLevel.has(s.task.levelId)) {
+        approvedTasksByLevel.set(s.task.levelId, /* @__PURE__ */ new Set());
+      }
+      approvedTasksByLevel.get(s.task.levelId).add(s.task.id);
+    }
+  }
+  const levelProgressByLevelId = new Map(userLevelProgress.map((lp) => [lp.levelId, lp]));
+  let completedLevelsCount = 0;
+  let l1Completed = false;
+  let l2Completed = false;
+  let l3Completed = false;
+  for (const lvl of levels) {
+    const taskSet = approvedTasksByLevel.get(lvl.id);
+    const lp = levelProgressByLevelId.get(lvl.id);
+    const approvedCount = Math.max(taskSet ? taskSet.size : 0, lp?.approvedTaskCount || 0);
+    const isCompleted = lvl.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+    if (isCompleted) {
+      completedLevelsCount++;
+      if (lvl.levelNumber === 1) l1Completed = true;
+      if (lvl.levelNumber === 2 && l1Completed) l2Completed = true;
+      if (lvl.levelNumber === 3 && l2Completed) l3Completed = true;
+    }
+  }
+  const validWithdrawals = withdrawals.filter((w) => w.approvalStatus !== "REJECTED");
+  const hasWithdrawnLevel1 = validWithdrawals.some(
+    (w) => w.notes?.includes("[LEVEL_1_WITHDRAWAL]") || !w.notes?.includes("[LEVEL_2_WITHDRAWAL]") && !w.notes?.includes("[UNRESTRICTED_WITHDRAWAL]")
+  );
+  const hasWithdrawnLevel2 = validWithdrawals.some(
+    (w) => w.notes?.includes("[LEVEL_2_WITHDRAWAL]") || validWithdrawals.length >= 2 && !w.notes?.includes("[UNRESTRICTED_WITHDRAWAL]")
+  );
+  const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
+  if (!l1Completed) {
+    return {
+      isLocked: true,
+      lockReason: "LEVEL_1_NOT_COMPLETED",
+      stage: "LOCKED_BEFORE_L1",
+      eligiblePercent: 0,
+      maxWithdrawableAmount: 0,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: notices[1] || "Complete Level 1 to unlock the withdrawal panel for the withdrawal",
+      hasWithdrawnLevel1: false,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount,
+      currentLevelNumber
+    };
+  }
+  if (l1Completed && !hasWithdrawnLevel1) {
+    return {
+      isLocked: false,
+      lockReason: null,
+      stage: "LEVEL_1",
+      eligiblePercent: 100,
+      maxWithdrawableAmount: availableBalance,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: notices[1] || "Level 1 completed! Withdraw your total account balance to unlock Level 2 tasks.",
+      hasWithdrawnLevel1: false,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount,
+      currentLevelNumber
+    };
+  }
+  if (l1Completed && hasWithdrawnLevel1 && !l2Completed) {
+    return {
+      isLocked: true,
+      lockReason: "LEVEL_2_NOT_COMPLETED",
+      stage: "LOCKED_BEFORE_L2",
+      eligiblePercent: 0,
+      maxWithdrawableAmount: 0,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: notices[2] || "Complete Level 2 to unlock the withdrawal panel for Level 2 reward",
+      hasWithdrawnLevel1: true,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount,
+      currentLevelNumber
+    };
+  }
+  if (l2Completed && !hasWithdrawnLevel2) {
+    return {
+      isLocked: false,
+      lockReason: null,
+      stage: "LEVEL_2",
+      eligiblePercent: 100,
+      maxWithdrawableAmount: availableBalance,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: notices[2] || "Level 2 completed! Request withdrawal of your full account balance. Upon approval, you will receive 10% payout and the remaining 90% will return to your account balance.",
+      hasWithdrawnLevel1: true,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount,
+      currentLevelNumber
+    };
+  }
+  if (l2Completed && hasWithdrawnLevel2 && !l3Completed) {
+    return {
+      isLocked: true,
+      lockReason: "LEVEL_3_NOT_COMPLETED",
+      stage: "LOCKED_BEFORE_L3",
+      eligiblePercent: 0,
+      maxWithdrawableAmount: 0,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: notices[3] || "Complete Level 3 to unlock unlimited withdrawals",
+      hasWithdrawnLevel1: true,
+      hasWithdrawnLevel2: true,
+      completedLevelsCount,
+      currentLevelNumber
+    };
+  }
+  return {
+    isLocked: false,
+    lockReason: null,
+    stage: "UNRESTRICTED",
+    eligiblePercent: 100,
+    maxWithdrawableAmount: availableBalance,
+    availableBalance,
+    isUnrestricted: true,
+    withdrawalNotice: "All Level 3 tasks completed! Withdrawals are fully unlocked with zero restrictions. You can withdraw any amount from your balance at any time.",
+    hasWithdrawnLevel1: true,
+    hasWithdrawnLevel2: true,
+    completedLevelsCount,
+    currentLevelNumber
+  };
+}
+
 // src/routes/withdrawalRoutes.ts
 var router6 = (0, import_express6.Router)();
 var withdrawalSchema = external_exports.object({
@@ -76272,40 +76474,24 @@ router6.get("/", requireAuth, async (req, res, next) => {
       where: { userId },
       orderBy: { createdAt: "desc" }
     });
+    const eligibility = await getWithdrawalEligibility(userId);
     const levels = await prisma.level.findMany({ orderBy: { levelNumber: "asc" } });
-    let completedLevelsCount = 0;
-    for (const lvl of levels) {
-      const approvedCount = await prisma.userTaskProgress.count({
-        where: { userId, task: { levelId: lvl.id }, status: "APPROVED" }
-      });
-      if (approvedCount >= (lvl.requiredTaskCount || 10)) completedLevelsCount++;
-    }
-    const wallet = await prisma.wallet.findUnique({ where: { userId } });
-    const availableBalance = wallet?.availableBalance || 0;
-    let eligiblePercent = 0;
-    let maxWithdrawableAmount = 0;
-    if (completedLevelsCount === 1) {
-      eligiblePercent = 100;
-      maxWithdrawableAmount = Math.min(150, availableBalance);
-    } else if (completedLevelsCount > 1) {
-      eligiblePercent = 10;
-      maxWithdrawableAmount = Math.max(
-        Math.min(150, availableBalance),
-        Math.floor(availableBalance * eligiblePercent / 100)
-      );
-    }
-    const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
     const notices = await getAllLevelWithdrawalNotices();
-    const withdrawalNotice = notices[currentLevelNumber] || (currentLevelNumber === 4 ? "Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward" : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
     res.json({
       withdrawals,
       withdrawalQuota: {
-        completedLevelsCount,
-        currentLevelNumber,
-        withdrawalNotice,
-        eligiblePercent,
-        maxWithdrawableAmount,
-        availableBalance,
+        completedLevelsCount: eligibility.completedLevelsCount,
+        currentLevelNumber: eligibility.currentLevelNumber,
+        withdrawalNotice: eligibility.withdrawalNotice,
+        eligiblePercent: eligibility.eligiblePercent,
+        maxWithdrawableAmount: eligibility.maxWithdrawableAmount,
+        availableBalance: eligibility.availableBalance,
+        isLocked: eligibility.isLocked,
+        lockReason: eligibility.lockReason,
+        stage: eligibility.stage,
+        isUnrestricted: eligibility.isUnrestricted,
+        hasWithdrawnLevel1: eligibility.hasWithdrawnLevel1,
+        hasWithdrawnLevel2: eligibility.hasWithdrawnLevel2,
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,
@@ -76321,48 +76507,46 @@ router6.post("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const validated = withdrawalSchema.parse(req.body);
+    const eligibility = await getWithdrawalEligibility(userId);
+    if (eligibility.isLocked) {
+      return res.status(400).json({
+        error: eligibility.withdrawalNotice || "Withdrawals are currently locked.",
+        isLocked: true
+      });
+    }
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.availableBalance <= 0) {
       return res.status(400).json({
         error: "You have no available balance to withdraw."
       });
     }
-    let exactAvailable = wallet.availableBalance;
-    if (process.env.NODE_ENV !== "test") {
-      const allLevels = await prisma.level.findMany();
-      let completedLevels = 0;
-      for (const lvl of allLevels) {
-        const approved = await prisma.userTaskProgress.count({
-          where: { userId, task: { levelId: lvl.id }, status: "APPROVED" }
-        });
-        if (approved >= (lvl.requiredTaskCount || 10)) completedLevels++;
-      }
-      if (completedLevels === 0) {
+    let tag = "[WITHDRAWAL]";
+    if (eligibility.stage === "LEVEL_1") {
+      tag = "[LEVEL_1_WITHDRAWAL]";
+      if (Math.abs(validated.amount - wallet.availableBalance) > 0.01) {
         return res.status(400).json({
-          error: "Withdrawals unlock on level completion. Complete all 10 tasks in Level 1 to withdraw your PKR 150 reward!"
+          error: `Level 1 completion requires withdrawing your total account balance of PKR ${wallet.availableBalance.toLocaleString()}.`,
+          exactAvailable: wallet.availableBalance
         });
       }
-      if (completedLevels === 1) {
-        exactAvailable = Math.min(150, wallet.availableBalance);
-      } else {
-        const percent = 10;
-        exactAvailable = Math.max(
-          Math.min(150, wallet.availableBalance),
-          Math.floor(wallet.availableBalance * percent / 100)
-        );
+    } else if (eligibility.stage === "LEVEL_2") {
+      tag = "[LEVEL_2_WITHDRAWAL]";
+      if (Math.abs(validated.amount - wallet.availableBalance) > 0.01) {
+        return res.status(400).json({
+          error: `Level 2 completion requires requesting your total account balance of PKR ${wallet.availableBalance.toLocaleString()}. Upon approval, 10% is disbursed and 90% returns to your account.`,
+          exactAvailable: wallet.availableBalance
+        });
+      }
+    } else if (eligibility.isUnrestricted) {
+      tag = "[UNRESTRICTED_WITHDRAWAL]";
+      if (validated.amount > wallet.availableBalance || validated.amount <= 0) {
+        return res.status(400).json({
+          error: `Withdrawal amount must not exceed your available balance of PKR ${wallet.availableBalance.toLocaleString()}.`,
+          exactAvailable: wallet.availableBalance
+        });
       }
     }
-    if (exactAvailable <= 0) {
-      return res.status(400).json({
-        error: "No withdrawable balance is currently available in your account."
-      });
-    }
-    if (validated.amount > exactAvailable || validated.amount <= 0) {
-      return res.status(400).json({
-        error: `Withdrawal amount must not exceed available withdrawable quota of PKR ${exactAvailable.toLocaleString()}.`,
-        exactAvailable
-      });
-    }
+    const reqNotes = validated.notes ? `${tag} ${validated.notes.trim()}` : tag;
     const withdrawal = await prisma.$transaction(async (tx) => {
       const reqRecord = await tx.withdrawalRequest.create({
         data: {
@@ -76371,7 +76555,7 @@ router6.post("/", requireAuth, async (req, res, next) => {
           paymentMethod: validated.paymentMethod,
           recipientName: validated.recipientName.trim(),
           recipientAccount: validated.recipientAccount.trim(),
-          notes: validated.notes || null,
+          notes: reqNotes,
           approvalStatus: "PENDING",
           paymentStatus: "NOT_SENT"
         }
@@ -78329,6 +78513,70 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
       return res.status(400).json({ error: `Withdrawal has already been reviewed (Status: ${withdrawal.approvalStatus})` });
     }
     if (action === "APPROVE") {
+      const isLevel2 = Boolean(withdrawal.notes?.includes("[LEVEL_2_WITHDRAWAL]"));
+      if (isLevel2) {
+        const totalAmount = withdrawal.amount;
+        const payoutAmount = Math.round(totalAmount * 0.1);
+        const refundAmount = totalAmount - payoutAmount;
+        const updated2 = await prisma.$transaction(async (tx) => {
+          const reqRec = await tx.withdrawalRequest.update({
+            where: { id: withdrawalId },
+            data: {
+              amount: payoutAmount,
+              approvalStatus: "APPROVED",
+              paymentStatus: "NOT_SENT",
+              reviewerId: req.admin.id,
+              reviewerName: req.admin.username,
+              reviewNotes: reviewNotes || `Level 2 approval: 10% (PKR ${payoutAmount.toLocaleString()}) approved for payout, 90% (PKR ${refundAmount.toLocaleString()}) returned to wallet`,
+              notes: `${withdrawal.notes || ""} | [L2_PROCESSED: payout=${payoutAmount}, refunded=${refundAmount}]`
+            }
+          });
+          await tx.wallet.update({
+            where: { userId: withdrawal.userId },
+            data: {
+              pendingBalance: { decrement: refundAmount },
+              availableBalance: { increment: refundAmount }
+            }
+          });
+          await tx.walletTransaction.create({
+            data: {
+              userId: withdrawal.userId,
+              transactionType: "WITHDRAWAL_PARTIAL_REFUND",
+              amount: refundAmount,
+              currency: "PKR",
+              status: "COMPLETED",
+              relatedEntityId: withdrawal.id,
+              actorId: req.admin.id,
+              actorName: req.admin.username,
+              reason: `90% account balance return for Level 2 withdrawal #${withdrawal.id.slice(-6)} (10% PKR ${payoutAmount.toLocaleString()} approved for payout)`,
+              notes: reviewNotes
+            }
+          });
+          await tx.notification.create({
+            data: {
+              userId: withdrawal.userId,
+              title: `Level 2 Withdrawal Approved! (10% Payout) \u2705`,
+              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.`,
+              notificationType: "WITHDRAWAL_STATUS"
+            }
+          });
+          return reqRec;
+        });
+        await logAdminAction({
+          adminId: req.admin.id,
+          adminUsername: req.admin.username,
+          action: "WITHDRAWAL_APPROVED",
+          entityType: "WithdrawalRequest",
+          entityId: withdrawalId,
+          newState: { approvalStatus: "APPROVED", paymentStatus: "NOT_SENT", amount: payoutAmount },
+          reason: `Level 2 withdrawal: 10% PKR ${payoutAmount} payout approved, 90% PKR ${refundAmount} refunded`,
+          ipAddress: req.ip
+        });
+        return res.json({
+          message: `Level 2 withdrawal approved! PKR ${payoutAmount.toLocaleString()} (10%) approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) returned to user wallet.`,
+          withdrawal: updated2
+        });
+      }
       const updated = await prisma.withdrawalRequest.update({
         where: { id: withdrawalId },
         data: {
@@ -79066,8 +79314,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-DzBx1SVr.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-FtsBys9z.css">
+    <script type="module" crossorigin src="/assets/main-iEIhMfQT.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-C_ayEacy.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -79210,11 +79458,11 @@ function createApp() {
   app2.use(import_express13.default.static(path4.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-DzBx1SVr.js")) {
-        return res.redirect(302, "/assets/main-DzBx1SVr.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-iEIhMfQT.js")) {
+        return res.redirect(302, "/assets/main-iEIhMfQT.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-FtsBys9z.css")) {
-        return res.redirect(302, "/assets/main-FtsBys9z.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-C_ayEacy.css")) {
+        return res.redirect(302, "/assets/main-C_ayEacy.css");
       }
       return res.status(404).end();
     }

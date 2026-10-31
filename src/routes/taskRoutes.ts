@@ -18,7 +18,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
   try {
     const userId = req.user!.id;
     await syncDatasetTasksToDatabase();
-    const [levels, userProgress, userLevelProgressList, approvedSubmissions] = await Promise.all([
+    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: 'APPROVED' },
@@ -30,6 +30,10 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
       prisma.taskSubmission.findMany({
         where: { userId, status: 'APPROVED' },
         select: { task: { select: { levelId: true, id: true } } },
+      }),
+      prisma.withdrawalRequest.findMany({
+        where: { userId, approvalStatus: { in: ['PENDING', 'APPROVED'] } },
+        select: { id: true, notes: true },
       }),
     ]);
 
@@ -73,13 +77,19 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
     const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
     const isLevel4Unlocked = level3Completed;
 
+    const hasWithdrawnLevel1 = userWithdrawals.length > 0;
+
     const levelsWithProgress = levels.map((lvl) => {
       const stats = levelStats.get(lvl.levelNumber)!;
       let isUnlocked = false;
+      let lockReason: string | null = null;
       if (lvl.levelNumber === 1) {
         isUnlocked = true;
       } else if (lvl.levelNumber === 2) {
-        isUnlocked = level1Completed;
+        isUnlocked = level1Completed && hasWithdrawnLevel1;
+        if (!isUnlocked && level1Completed && !hasWithdrawnLevel1) {
+          lockReason = 'You must withdraw your total account balance from Level 1 before Level 2 tasks unlock.';
+        }
       } else if (lvl.levelNumber === 3) {
         isUnlocked = level2Completed;
       } else {
@@ -99,6 +109,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
         approvedTaskCount: stats.approvedCount,
         isCompleted: stats.isCompleted,
         isUnlocked,
+        lockReason,
       };
     });
 
@@ -224,6 +235,11 @@ router.post('/:taskId/unlock', requireAuth, async (req: AuthRequest, res: Respon
     // Validate level and prerequisite task
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
     if (!isLevelUnlocked) {
+      if (task.level.levelNumber === 2) {
+        return res.status(403).json({
+          error: 'Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.',
+        });
+      }
       return res.status(403).json({ error: `Level ${task.level.levelNumber} is locked. Complete all tasks in the previous level first.` });
     }
 
@@ -357,6 +373,11 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
 
     const { tasks, isLevelUnlocked } = await taskProgressionService.getLevelTasksForUser(userId, task.level.levelNumber);
     if (!isLevelUnlocked) {
+      if (task.level.levelNumber === 2) {
+        return res.status(403).json({
+          error: 'Level 2 is locked. You must withdraw your total account balance from Level 1 before you can complete Level 2 tasks.',
+        });
+      }
       return res.status(403).json({ error: 'This level is locked' });
     }
 

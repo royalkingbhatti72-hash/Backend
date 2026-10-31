@@ -52,6 +52,7 @@ export const taskProgressionService = {
       wallet,
       currentLevelProgressRecords,
       currentLevelSubmissions,
+      userWithdrawalsList,
     ] = await Promise.all([
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },
@@ -85,6 +86,10 @@ export const taskProgressionService = {
           task: { levelId: level.id },
         },
         orderBy: { createdAt: 'desc' },
+      }),
+      prisma.withdrawalRequest.findMany({
+        where: { userId, approvalStatus: { in: ['PENDING', 'APPROVED'] } },
+        select: { id: true, notes: true, approvalStatus: true },
       }),
     ]);
 
@@ -129,12 +134,15 @@ export const taskProgressionService = {
     const l3Completed = l2Completed && (levelStatsByNumber.get(3)?.isCompleted || false);
     const isLevel4Unlocked = l3Completed;
 
+    const hasWithdrawnLevel1 = userWithdrawalsList.length > 0;
+
     // Check if current level is unlocked
     let isLevelUnlocked = false;
     if (levelNumber === 1) {
       isLevelUnlocked = true;
     } else if (levelNumber === 2) {
-      isLevelUnlocked = l1Completed;
+      // Level 2 requires Level 1 completed AND user must withdraw total account balance from Level 1
+      isLevelUnlocked = l1Completed && hasWithdrawnLevel1;
     } else if (levelNumber === 3) {
       isLevelUnlocked = l2Completed;
     } else {
@@ -148,13 +156,21 @@ export const taskProgressionService = {
 
     if (!isLevelUnlocked) {
       isTask1Eligible = false;
-      task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
+      if (levelNumber === 2 && l1Completed && !hasWithdrawnLevel1) {
+        task1LockMessage = 'Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.';
+      } else {
+        task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
+      }
     } else if (levelNumber === 1) {
       isTask1Eligible = true;
     } else if (levelNumber === 2) {
-      isTask1Eligible = l1Completed;
+      isTask1Eligible = l1Completed && hasWithdrawnLevel1;
       if (!isTask1Eligible) {
-        task1LockMessage = 'Complete all tasks in Level 1 first to unlock Level 2 tasks.';
+        if (!l1Completed) {
+          task1LockMessage = 'Complete all tasks in Level 1 first to unlock Level 2 tasks.';
+        } else {
+          task1LockMessage = 'You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.';
+        }
       }
     } else if (levelNumber === 3) {
       isTask1Eligible = l2Completed;
@@ -198,7 +214,9 @@ export const taskProgressionService = {
           taskNumber: task.taskNumber,
           title: hideDetails ? `Locked Task #${task.taskNumber}` : task.title,
           description: hideDetails
-            ? `Complete Level ${level.levelNumber - 1} to unlock this level and view task details.`
+            ? (level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1
+                ? 'Withdraw your total account balance from Level 1 first to unlock Level 2 tasks.'
+                : `Complete Level ${level.levelNumber - 1} to unlock this level and view task details.`)
             : task.description,
           taskType: hideDetails ? 'Locked' : (task.taskType || (isPrepaidTask ? 'Prepaid Task' : 'Task')),
           rewardAmount: hideDetails ? 0 : task.rewardAmount,
@@ -209,7 +227,10 @@ export const taskProgressionService = {
           status: task.status,
           userStatus: 'LOCKED',
           isPaidUnlocked: false,
-          lockMessage: `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
+          lockMessage:
+            level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1
+              ? 'Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.'
+              : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
           instructions: null,
           protectedUrl: null,
           submissionInstructions: null,

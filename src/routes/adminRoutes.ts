@@ -1560,6 +1560,80 @@ router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminA
     }
 
     if (action === 'APPROVE') {
+      const isLevel2 = Boolean(withdrawal.notes?.includes('[LEVEL_2_WITHDRAWAL]'));
+
+      if (isLevel2) {
+        const totalAmount = withdrawal.amount;
+        const payoutAmount = Math.round(totalAmount * 0.10);
+        const refundAmount = totalAmount - payoutAmount;
+
+        const updated = await prisma.$transaction(async (tx) => {
+          const reqRec = await tx.withdrawalRequest.update({
+            where: { id: withdrawalId },
+            data: {
+              amount: payoutAmount,
+              approvalStatus: 'APPROVED',
+              paymentStatus: 'NOT_SENT',
+              reviewerId: req.admin!.id,
+              reviewerName: req.admin!.username,
+              reviewNotes: reviewNotes || `Level 2 approval: 10% (PKR ${payoutAmount.toLocaleString()}) approved for payout, 90% (PKR ${refundAmount.toLocaleString()}) returned to wallet`,
+              notes: `${withdrawal.notes || ''} | [L2_PROCESSED: payout=${payoutAmount}, refunded=${refundAmount}]`,
+            },
+          });
+
+          // Return 90% from pendingBalance back to availableBalance
+          await tx.wallet.update({
+            where: { userId: withdrawal.userId },
+            data: {
+              pendingBalance: { decrement: refundAmount },
+              availableBalance: { increment: refundAmount },
+            },
+          });
+
+          await tx.walletTransaction.create({
+            data: {
+              userId: withdrawal.userId,
+              transactionType: 'WITHDRAWAL_PARTIAL_REFUND',
+              amount: refundAmount,
+              currency: 'PKR',
+              status: 'COMPLETED',
+              relatedEntityId: withdrawal.id,
+              actorId: req.admin!.id,
+              actorName: req.admin!.username,
+              reason: `90% account balance return for Level 2 withdrawal #${withdrawal.id.slice(-6)} (10% PKR ${payoutAmount.toLocaleString()} approved for payout)`,
+              notes: reviewNotes,
+            },
+          });
+
+          await tx.notification.create({
+            data: {
+              userId: withdrawal.userId,
+              title: `Level 2 Withdrawal Approved! (10% Payout) ✅`,
+              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.`,
+              notificationType: 'WITHDRAWAL_STATUS',
+            },
+          });
+
+          return reqRec;
+        });
+
+        await logAdminAction({
+          adminId: req.admin!.id,
+          adminUsername: req.admin!.username,
+          action: 'WITHDRAWAL_APPROVED',
+          entityType: 'WithdrawalRequest',
+          entityId: withdrawalId,
+          newState: { approvalStatus: 'APPROVED', paymentStatus: 'NOT_SENT', amount: payoutAmount },
+          reason: `Level 2 withdrawal: 10% PKR ${payoutAmount} payout approved, 90% PKR ${refundAmount} refunded`,
+          ipAddress: req.ip,
+        });
+
+        return res.json({
+          message: `Level 2 withdrawal approved! PKR ${payoutAmount.toLocaleString()} (10%) approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) returned to user wallet.`,
+          withdrawal: updated,
+        });
+      }
+
       // Mark Approved (Payment remains NOT_SENT until admin actually sends funds)
       const updated = await prisma.withdrawalRequest.update({
         where: { id: withdrawalId },

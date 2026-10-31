@@ -7,6 +7,7 @@ import {
   getAllLevelWithdrawalNotices,
   getLevelWithdrawalNotice,
 } from '../services/levelNoticeService';
+import { getWithdrawalEligibility } from '../services/withdrawalEligibilityService';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ const withdrawalSchema = z.object({
 
 /**
  * GET /api/withdrawals
- * User withdrawal history
+ * User withdrawal history and level-aware quota
  */
 router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
@@ -30,51 +31,25 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Calculate level progression and withdrawal limit
+    const eligibility = await getWithdrawalEligibility(userId);
     const levels = await prisma.level.findMany({ orderBy: { levelNumber: 'asc' } });
-    let completedLevelsCount = 0;
-    for (const lvl of levels) {
-      const approvedCount = await prisma.userTaskProgress.count({
-        where: { userId, task: { levelId: lvl.id }, status: 'APPROVED' },
-      });
-      if (approvedCount >= (lvl.requiredTaskCount || 10)) completedLevelsCount++;
-    }
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId } });
-    const availableBalance = wallet?.availableBalance || 0;
-
-    let eligiblePercent = 0;
-    let maxWithdrawableAmount = 0;
-
-    if (completedLevelsCount === 1) {
-      // Level 1: Client can withdraw total Level 1 reward of PKR 150
-      eligiblePercent = 100;
-      maxWithdrawableAmount = Math.min(150, availableBalance);
-    } else if (completedLevelsCount > 1) {
-      eligiblePercent = 10;
-      maxWithdrawableAmount = Math.max(
-        Math.min(150, availableBalance),
-        Math.floor((availableBalance * eligiblePercent) / 100)
-      );
-    }
-
-    const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
     const notices = await getAllLevelWithdrawalNotices();
-    const withdrawalNotice =
-      notices[currentLevelNumber] ||
-      (currentLevelNumber === 4
-        ? 'Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward'
-        : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
 
     res.json({
       withdrawals,
       withdrawalQuota: {
-        completedLevelsCount,
-        currentLevelNumber,
-        withdrawalNotice,
-        eligiblePercent,
-        maxWithdrawableAmount,
-        availableBalance,
+        completedLevelsCount: eligibility.completedLevelsCount,
+        currentLevelNumber: eligibility.currentLevelNumber,
+        withdrawalNotice: eligibility.withdrawalNotice,
+        eligiblePercent: eligibility.eligiblePercent,
+        maxWithdrawableAmount: eligibility.maxWithdrawableAmount,
+        availableBalance: eligibility.availableBalance,
+        isLocked: eligibility.isLocked,
+        lockReason: eligibility.lockReason,
+        stage: eligibility.stage,
+        isUnrestricted: eligibility.isUnrestricted,
+        hasWithdrawnLevel1: eligibility.hasWithdrawnLevel1,
+        hasWithdrawnLevel2: eligibility.hasWithdrawnLevel2,
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,
@@ -96,7 +71,17 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
     const userId = req.user!.id;
     const validated = withdrawalSchema.parse(req.body);
 
-    // Verify wallet balance
+    const eligibility = await getWithdrawalEligibility(userId);
+
+    // 1. Enforce lock rule
+    if (eligibility.isLocked) {
+      return res.status(400).json({
+        error: eligibility.withdrawalNotice || 'Withdrawals are currently locked.',
+        isLocked: true,
+      });
+    }
+
+    // 2. Verify wallet balance
     const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.availableBalance <= 0) {
       return res.status(400).json({
@@ -104,47 +89,37 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
       });
     }
 
-    // Calculate amount available for withdrawal (Full PKR 150 on Level 1 completion, 10% on subsequent levels)
-    let exactAvailable = wallet.availableBalance;
-    if (process.env.NODE_ENV !== 'test') {
-      const allLevels = await prisma.level.findMany();
-      let completedLevels = 0;
-      for (const lvl of allLevels) {
-        const approved = await prisma.userTaskProgress.count({
-          where: { userId, task: { levelId: lvl.id }, status: 'APPROVED' },
-        });
-        if (approved >= (lvl.requiredTaskCount || 10)) completedLevels++;
-      }
-
-      if (completedLevels === 0) {
+    // 3. Amount validation per stage
+    let tag = '[WITHDRAWAL]';
+    if (eligibility.stage === 'LEVEL_1') {
+      tag = '[LEVEL_1_WITHDRAWAL]';
+      if (Math.abs(validated.amount - wallet.availableBalance) > 0.01) {
         return res.status(400).json({
-          error: 'Withdrawals unlock on level completion. Complete all 10 tasks in Level 1 to withdraw your PKR 150 reward!',
+          error: `Level 1 completion requires withdrawing your total account balance of PKR ${wallet.availableBalance.toLocaleString()}.`,
+          exactAvailable: wallet.availableBalance,
         });
       }
-
-      if (completedLevels === 1) {
-        exactAvailable = Math.min(150, wallet.availableBalance);
-      } else {
-        const percent = 10;
-        exactAvailable = Math.max(
-          Math.min(150, wallet.availableBalance),
-          Math.floor((wallet.availableBalance * percent) / 100)
-        );
+    } else if (eligibility.stage === 'LEVEL_2') {
+      tag = '[LEVEL_2_WITHDRAWAL]';
+      if (Math.abs(validated.amount - wallet.availableBalance) > 0.01) {
+        return res.status(400).json({
+          error: `Level 2 completion requires requesting your total account balance of PKR ${wallet.availableBalance.toLocaleString()}. Upon approval, 10% is disbursed and 90% returns to your account.`,
+          exactAvailable: wallet.availableBalance,
+        });
+      }
+    } else if (eligibility.isUnrestricted) {
+      tag = '[UNRESTRICTED_WITHDRAWAL]';
+      if (validated.amount > wallet.availableBalance || validated.amount <= 0) {
+        return res.status(400).json({
+          error: `Withdrawal amount must not exceed your available balance of PKR ${wallet.availableBalance.toLocaleString()}.`,
+          exactAvailable: wallet.availableBalance,
+        });
       }
     }
 
-    if (exactAvailable <= 0) {
-      return res.status(400).json({
-        error: 'No withdrawable balance is currently available in your account.',
-      });
-    }
-
-    if (validated.amount > exactAvailable || validated.amount <= 0) {
-      return res.status(400).json({
-        error: `Withdrawal amount must not exceed available withdrawable quota of PKR ${exactAvailable.toLocaleString()}.`,
-        exactAvailable,
-      });
-    }
+    const reqNotes = validated.notes
+      ? `${tag} ${validated.notes.trim()}`
+      : tag;
 
     // Execute atomic reservation
     const withdrawal = await prisma.$transaction(async (tx) => {
@@ -156,7 +131,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
           paymentMethod: validated.paymentMethod,
           recipientName: validated.recipientName.trim(),
           recipientAccount: validated.recipientAccount.trim(),
-          notes: validated.notes || null,
+          notes: reqNotes,
           approvalStatus: 'PENDING',
           paymentStatus: 'NOT_SENT',
         },
