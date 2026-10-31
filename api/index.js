@@ -79191,7 +79191,7 @@ function createApp() {
     res.json({
       status: "ok",
       name: "Earn Street API",
-      version: "telegram-bot-v1.0.1",
+      version: "telegram-bot-v1.0.3-fast-webhook",
       timestamp: /* @__PURE__ */ new Date()
     });
   });
