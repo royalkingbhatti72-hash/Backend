@@ -16,7 +16,7 @@ const registerSchema = z.object({
   phone: z.string().min(10, 'Valid phone number is required').max(15),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   confirmPassword: z.string().min(6, 'Confirm password must be at least 6 characters'),
-  referralCode: z.string().min(1, 'Referral code is required. Registration is invite-only.'),
+  referralCode: z.string().min(1, 'Invitation code is required. Registration is invite-only with an official admin code.'),
 }).refine((data) => data.password === data.confirmPassword, {
   message: 'Passwords do not match',
   path: ['confirmPassword'],
@@ -61,14 +61,14 @@ router.post('/register', async (req: Request, res: Response, next) => {
     const trimmedRefCode = (validated.referralCode || '').trim().toUpperCase();
     if (!trimmedRefCode) {
       return res.status(400).json({
-        error: 'A valid referral code is required to register. Registration is invite-only.',
+        error: 'An official invitation code is required to register. Client self-invites are disabled; codes are provided exclusively by administration.',
       });
     }
 
     const isValidAdminCode = await validateAdminReferralCode(trimmedRefCode);
     if (!isValidAdminCode) {
       return res.status(400).json({
-        error: 'Invalid or already used referral code. Registration requires an exclusive invitation code provided by administration.',
+        error: 'Invalid or already used invitation code. Registration requires an exclusive 1-time invitation code provided directly by administration.',
       });
     }
 

@@ -64981,7 +64981,7 @@ var registerSchema = external_exports.object({
   phone: external_exports.string().min(10, "Valid phone number is required").max(15),
   password: external_exports.string().min(6, "Password must be at least 6 characters"),
   confirmPassword: external_exports.string().min(6, "Confirm password must be at least 6 characters"),
-  referralCode: external_exports.string().min(1, "Referral code is required. Registration is invite-only.")
+  referralCode: external_exports.string().min(1, "Invitation code is required. Registration is invite-only with an official admin code.")
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"]
@@ -65010,13 +65010,13 @@ router.post("/register", async (req, res, next) => {
     const trimmedRefCode = (validated.referralCode || "").trim().toUpperCase();
     if (!trimmedRefCode) {
       return res.status(400).json({
-        error: "A valid referral code is required to register. Registration is invite-only."
+        error: "An official invitation code is required to register. Client self-invites are disabled; codes are provided exclusively by administration."
       });
     }
     const isValidAdminCode = await validateAdminReferralCode(trimmedRefCode);
     if (!isValidAdminCode) {
       return res.status(400).json({
-        error: "Invalid or already used referral code. Registration requires an exclusive invitation code provided by administration."
+        error: "Invalid or already used invitation code. Registration requires an exclusive 1-time invitation code provided directly by administration."
       });
     }
     const existingUser = await prisma.user.findUnique({
@@ -78736,7 +78736,7 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-DHoFj3Ux.js"></script>
+    <script type="module" crossorigin src="/assets/main-r7sOXJyo.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/main-DS2PREl8.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
@@ -78871,11 +78871,11 @@ function createApp() {
   app2.use(import_express12.default.static(path4.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-XkjKVoLe.js")) {
-        return res.redirect(302, "/assets/main-XkjKVoLe.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-r7sOXJyo.js")) {
+        return res.redirect(302, "/assets/main-r7sOXJyo.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-Dd4xDWgh.css")) {
-        return res.redirect(302, "/assets/main-Dd4xDWgh.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-DS2PREl8.css")) {
+        return res.redirect(302, "/assets/main-DS2PREl8.css");
       }
       return res.status(404).end();
     }
