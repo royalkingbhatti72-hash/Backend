@@ -163,6 +163,7 @@ export function createApp() {
   app.use('/api/settings', settingsRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/telegram', telegramRoutes);
+  app.use('/telegram', telegramRoutes);
 
   // Root & Health check endpoints
   app.get(['/api', '/api/index'], (req, res) => {
@@ -173,12 +174,19 @@ export function createApp() {
       endpoints: {
         health: '/api/health',
         publicSettings: '/api/settings/public',
+        telegramInfo: '/api/telegram/info',
+        telegramSetup: '/api/telegram/setup',
       },
     });
   });
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', name: 'Earn Street API', timestamp: new Date() });
+    res.json({
+      status: 'ok',
+      name: 'Earn Street API',
+      version: 'telegram-bot-v1.0.1',
+      timestamp: new Date(),
+    });
   });
 
   // Static assets for the Royal Administration Portal

@@ -79025,6 +79025,7 @@ function createApp() {
   app2.use("/api/settings", settingsRoutes_default);
   app2.use("/api/admin", adminRoutes_default);
   app2.use("/api/telegram", telegramRoutes_default);
+  app2.use("/telegram", telegramRoutes_default);
   app2.get(["/api", "/api/index"], (req, res) => {
     res.json({
       name: "Earn Street API Server",
@@ -79032,12 +79033,19 @@ function createApp() {
       message: "Backend API server is running.",
       endpoints: {
         health: "/api/health",
-        publicSettings: "/api/settings/public"
+        publicSettings: "/api/settings/public",
+        telegramInfo: "/api/telegram/info",
+        telegramSetup: "/api/telegram/setup"
       }
     });
   });
   app2.get("/api/health", (req, res) => {
-    res.json({ status: "ok", name: "Earn Street API", timestamp: /* @__PURE__ */ new Date() });
+    res.json({
+      status: "ok",
+      name: "Earn Street API",
+      version: "telegram-bot-v1.0.1",
+      timestamp: /* @__PURE__ */ new Date()
+    });
   });
   const publicDir = path4.resolve(__dirname3, "../public");
   const backendAssetsDir = path4.resolve(__dirname3, "../assets");
