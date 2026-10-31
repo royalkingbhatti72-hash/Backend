@@ -77224,6 +77224,42 @@ async function logAdminAction(params) {
   }
 }
 
+// src/services/identityService.ts
+var tableEnsured3 = false;
+async function ensureIdentityTable() {
+  if (tableEnsured3) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "IdentityVerification" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "userId" TEXT NOT NULL UNIQUE,
+        "idFrontImage" TEXT NOT NULL,
+        "idBackImage" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'PENDING',
+        "cnicNumber" TEXT,
+        "fullName" TEXT,
+        "gender" TEXT,
+        "dateOfBirth" TIMESTAMP(3),
+        "reviewerId" TEXT,
+        "reviewerName" TEXT,
+        "reviewNotes" TEXT,
+        "rejectionReason" TEXT,
+        "submittedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "reviewedAt" TIMESTAMP(3),
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "IdentityVerification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "IdentityVerification_status_createdAt_idx" ON "IdentityVerification"("status", "createdAt" DESC);
+    `);
+    tableEnsured3 = true;
+  } catch (err) {
+    console.error("Error ensuring IdentityVerification table:", err);
+  }
+}
+
 // src/routes/adminRoutes.ts
 var router11 = (0, import_express11.Router)();
 var adminLoginSchema = external_exports.object({
@@ -77274,6 +77310,7 @@ router11.get("/me", requireAdmin, (req, res) => {
 });
 router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const [
       pendingTasks,
       pendingSpinsHistory,
@@ -77294,7 +77331,7 @@ router11.get(["/notifications/counts", "/pending-counts"], requireAdmin, async (
           ]
         }
       }),
-      prisma.identityVerification.count({ where: { status: "PENDING" } })
+      prisma.identityVerification.count({ where: { status: "PENDING" } }).catch(() => 0)
     ]);
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
     const total = pendingTasks + pendingSpins + pendingDeposits + pendingWithdrawals + pendingIdentities;
@@ -77337,7 +77374,7 @@ router11.get("/dashboard", requireAdmin, async (req, res, next) => {
       prisma.taskSubmission.count({ where: { status: "PENDING" } }),
       prisma.depositRequest.count({ where: { status: "PENDING" } }),
       prisma.withdrawalRequest.count({ where: { approvalStatus: "PENDING" } }),
-      prisma.identityVerification.count({ where: { status: "PENDING" } }),
+      prisma.identityVerification.count({ where: { status: "PENDING" } }).catch(() => 0),
       prisma.depositRequest.aggregate({
         where: { status: "APPROVED" },
         _sum: { amount: true }
@@ -79225,6 +79262,7 @@ router11.post("/telegram-users/:chatId/grant", requireAdmin, async (req, res, ne
 });
 router11.get("/identity-verifications", requireAdmin, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const { status, search, page = "1", limit = "20" } = req.query;
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
@@ -79282,6 +79320,7 @@ router11.get("/identity-verifications", requireAdmin, async (req, res, next) => 
 });
 router11.get("/identity-verifications/:id", requireAdmin, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const id = req.params.id;
     const verification = await prisma.identityVerification.findUnique({
       where: { id },
@@ -79307,6 +79346,7 @@ router11.get("/identity-verifications/:id", requireAdmin, async (req, res, next)
 });
 router11.put("/identity-verifications/:id/review", requireAdmin, async (req, res, next) => {
   try {
+    await ensureIdentityTable();
     const id = req.params.id;
     const reviewSchema = external_exports.object({
       action: external_exports.enum(["APPROVE", "REJECT"]),
@@ -79516,6 +79556,10 @@ var telegramRoutes_default = router12;
 // src/routes/identityRoutes.ts
 var import_express13 = __toESM(require_express2(), 1);
 var router13 = (0, import_express13.Router)();
+router13.use(async (req, res, next) => {
+  await ensureIdentityTable();
+  next();
+});
 var identitySubmissionSchema = external_exports.object({
   idFrontImage: external_exports.string().min(50, "Front image of ID card is required"),
   idBackImage: external_exports.string().min(50, "Back image of ID card is required")
@@ -79533,6 +79577,15 @@ router13.get("/", requireAuth, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+router13.get("/debug-db", async (req, res) => {
+  try {
+    const dbInfo = await prisma.$queryRawUnsafe(`SELECT current_database(), current_user, inet_server_addr()`);
+    const tables = await prisma.$queryRawUnsafe(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`);
+    res.json({ dbInfo, tableNames: tables.map((t) => t.table_name) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 router13.post("/", requireAuth, async (req, res, next) => {

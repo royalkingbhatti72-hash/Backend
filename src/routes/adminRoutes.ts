@@ -25,6 +25,7 @@ import {
   getAllTelegramUsers,
   grantMoreCodesToTelegramUser,
 } from '../services/telegramService';
+import { ensureIdentityTable } from '../services/identityService';
 
 const router = Router();
 
@@ -93,6 +94,7 @@ router.get('/me', requireAdmin, (req: AdminAuthRequest, res: Response) => {
 
 router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const [
       pendingTasks,
       pendingSpinsHistory,
@@ -113,7 +115,7 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
           ],
         },
       }),
-      prisma.identityVerification.count({ where: { status: 'PENDING' } }),
+      prisma.identityVerification.count({ where: { status: 'PENDING' } }).catch(() => 0),
     ]);
 
     const pendingSpins = pendingSpinsHistory + pendingSpinsEntitlement;
@@ -163,7 +165,7 @@ router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Respon
       prisma.taskSubmission.count({ where: { status: 'PENDING' } }),
       prisma.depositRequest.count({ where: { status: 'PENDING' } }),
       prisma.withdrawalRequest.count({ where: { approvalStatus: 'PENDING' } }),
-      prisma.identityVerification.count({ where: { status: 'PENDING' } }),
+      prisma.identityVerification.count({ where: { status: 'PENDING' } }).catch(() => 0),
       prisma.depositRequest.aggregate({
         where: { status: 'APPROVED' },
         _sum: { amount: true },
@@ -2400,6 +2402,7 @@ router.post('/telegram-users/:chatId/grant', requireAdmin, async (req: AdminAuth
 
 router.get('/identity-verifications', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const { status, search, page = '1', limit = '20' } = req.query;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
@@ -2462,6 +2465,7 @@ router.get('/identity-verifications', requireAdmin, async (req: AdminAuthRequest
 
 router.get('/identity-verifications/:id', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const id = req.params.id as string;
     const verification = await prisma.identityVerification.findUnique({
       where: { id },
@@ -2490,6 +2494,7 @@ router.get('/identity-verifications/:id', requireAdmin, async (req: AdminAuthReq
 
 router.put('/identity-verifications/:id/review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    await ensureIdentityTable();
     const id = req.params.id as string;
     const reviewSchema = z.object({
       action: z.enum(['APPROVE', 'REJECT']),

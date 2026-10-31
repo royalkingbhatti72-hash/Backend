@@ -2,8 +2,15 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { ensureIdentityTable } from '../services/identityService';
 
 const router = Router();
+
+// Ensure table exists on first route access
+router.use(async (req, res, next) => {
+  await ensureIdentityTable();
+  next();
+});
 
 const identitySubmissionSchema = z.object({
   idFrontImage: z.string().min(50, 'Front image of ID card is required'),
@@ -28,6 +35,16 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+router.get('/debug-db', async (req, res) => {
+  try {
+    const dbInfo: any = await prisma.$queryRawUnsafe(`SELECT current_database(), current_user, inet_server_addr()`);
+    const tables: any = await prisma.$queryRawUnsafe(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`);
+    res.json({ dbInfo, tableNames: tables.map((t: any) => t.table_name) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -92,3 +109,4 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
 });
 
 export default router;
+
