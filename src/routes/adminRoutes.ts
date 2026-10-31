@@ -15,6 +15,12 @@ import {
   generateAdditionalCodes,
   ensureAdminReferralCodes,
 } from '../services/adminReferralService';
+import {
+  getAllLevelWithdrawalNotices,
+  getLevelWithdrawalNotice,
+  setLevelWithdrawalNotice,
+  DEFAULT_LEVEL_WITHDRAWAL_NOTICES,
+} from '../services/levelNoticeService';
 
 const router = Router();
 
@@ -877,7 +883,16 @@ router.get('/levels', requireAdmin, async (req: AdminAuthRequest, res: Response,
       },
     });
 
-    res.json({ levels });
+    const notices = await getAllLevelWithdrawalNotices();
+    const levelsWithNotices = levels.map((lvl) => ({
+      ...lvl,
+      withdrawalNotice:
+        notices[lvl.levelNumber] ||
+        DEFAULT_LEVEL_WITHDRAWAL_NOTICES[lvl.levelNumber] ||
+        `Complete Level ${lvl.levelNumber} to unlock the withdrawal panel for Level ${lvl.levelNumber} reward`,
+    }));
+
+    res.json({ levels: levelsWithNotices });
   } catch (err) {
     next(err);
   }
@@ -898,10 +913,18 @@ router.put('/levels/:levelId', requireAdmin, async (req: AdminAuthRequest, res: 
     const existing = await prisma.level.findUnique({ where: { id: levelId } });
     if (!existing) return res.status(404).json({ error: 'Level not found' });
 
+    if (validated.withdrawalNotice !== undefined && validated.withdrawalNotice !== null) {
+      await setLevelWithdrawalNotice(existing.levelNumber, validated.withdrawalNotice);
+    }
+
+    const { withdrawalNotice, ...levelUpdateData } = validated;
+
     const updated = await prisma.level.update({
       where: { id: levelId },
-      data: validated,
+      data: levelUpdateData,
     });
+
+    const currentNotice = await getLevelWithdrawalNotice(existing.levelNumber);
 
     await logAdminAction({
       adminId: req.admin!.id,
@@ -910,11 +933,14 @@ router.put('/levels/:levelId', requireAdmin, async (req: AdminAuthRequest, res: 
       entityType: 'Level',
       entityId: levelId,
       previousState: existing,
-      newState: updated,
+      newState: { ...updated, withdrawalNotice: currentNotice },
       ipAddress: req.ip,
     });
 
-    res.json({ message: 'Level updated successfully', level: updated });
+    res.json({
+      message: 'Level updated successfully',
+      level: { ...updated, withdrawalNotice: currentNotice },
+    });
   } catch (err) {
     next(err);
   }

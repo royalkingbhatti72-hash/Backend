@@ -75871,6 +75871,63 @@ var depositRoutes_default = router5;
 
 // src/routes/withdrawalRoutes.ts
 var import_express6 = __toESM(require_express2(), 1);
+
+// src/services/levelNoticeService.ts
+var DEFAULT_LEVEL_WITHDRAWAL_NOTICES = {
+  1: "Complete Level 1 to unlock the withdrawal panel for the withdrawal",
+  2: "Complete Level 2 to unlock the withdrawal panel for Level 2 reward",
+  3: "Complete Level 3 to unlock the withdrawal panel for Level 3 reward",
+  4: "Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward",
+  5: "Complete Level 5 to unlock the withdrawal panel for Level 5 reward",
+  6: "Complete Level 6 to unlock the withdrawal panel for Level 6 reward",
+  7: "Complete Level 7 to unlock the withdrawal panel for Level 7 reward",
+  8: "Complete Level 8 to unlock the withdrawal panel for Level 8 reward",
+  9: "Complete Level 9 to unlock the withdrawal panel for Level 9 reward",
+  10: "Complete Level 10 to unlock the withdrawal panel for Level 10 reward"
+};
+async function getAllLevelWithdrawalNotices() {
+  try {
+    const settings = await prisma.siteSetting.findMany({
+      where: {
+        key: {
+          startsWith: "WITHDRAWAL_NOTICE_LEVEL_"
+        }
+      }
+    });
+    const result = { ...DEFAULT_LEVEL_WITHDRAWAL_NOTICES };
+    for (const s of settings) {
+      const lvlNum = parseInt(s.key.replace("WITHDRAWAL_NOTICE_LEVEL_", ""), 10);
+      if (!isNaN(lvlNum) && s.value) {
+        result[lvlNum] = s.value;
+      }
+    }
+    return result;
+  } catch (err) {
+    console.error("Failed to load level withdrawal notices from SiteSetting:", err);
+    return { ...DEFAULT_LEVEL_WITHDRAWAL_NOTICES };
+  }
+}
+async function getLevelWithdrawalNotice(levelNumber) {
+  const notices = await getAllLevelWithdrawalNotices();
+  return notices[levelNumber] || DEFAULT_LEVEL_WITHDRAWAL_NOTICES[levelNumber] || `Complete Level ${levelNumber} to unlock the withdrawal panel for the withdrawal`;
+}
+async function setLevelWithdrawalNotice(levelNumber, notice) {
+  const key = `WITHDRAWAL_NOTICE_LEVEL_${levelNumber}`;
+  await prisma.siteSetting.upsert({
+    where: { key },
+    create: {
+      key,
+      value: notice.trim(),
+      category: "FINANCE",
+      description: `Withdrawal requirement notice for Level ${levelNumber}`
+    },
+    update: {
+      value: notice.trim()
+    }
+  });
+}
+
+// src/routes/withdrawalRoutes.ts
 var router6 = (0, import_express6.Router)();
 var withdrawalSchema = external_exports.object({
   amount: external_exports.number().positive("Withdrawal amount must be greater than zero"),
@@ -75909,8 +75966,8 @@ router6.get("/", requireAuth, async (req, res, next) => {
       );
     }
     const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
-    const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
-    const withdrawalNotice = currentLevel?.withdrawalNotice || (currentLevelNumber === 4 ? "Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward" : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
+    const notices = await getAllLevelWithdrawalNotices();
+    const withdrawalNotice = notices[currentLevelNumber] || (currentLevelNumber === 4 ? "Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward" : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
     res.json({
       withdrawals,
       withdrawalQuota: {
@@ -75923,7 +75980,7 @@ router6.get("/", requireAuth, async (req, res, next) => {
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,
-          notice: l.withdrawalNotice || ""
+          notice: notices[l.levelNumber] || ""
         }))
       }
     });
@@ -77386,7 +77443,12 @@ router11.get("/levels", requireAdmin, async (req, res, next) => {
         _count: { select: { userProgress: true } }
       }
     });
-    res.json({ levels });
+    const notices = await getAllLevelWithdrawalNotices();
+    const levelsWithNotices = levels.map((lvl) => ({
+      ...lvl,
+      withdrawalNotice: notices[lvl.levelNumber] || DEFAULT_LEVEL_WITHDRAWAL_NOTICES[lvl.levelNumber] || `Complete Level ${lvl.levelNumber} to unlock the withdrawal panel for Level ${lvl.levelNumber} reward`
+    }));
+    res.json({ levels: levelsWithNotices });
   } catch (err) {
     next(err);
   }
@@ -77404,10 +77466,15 @@ router11.put("/levels/:levelId", requireAdmin, async (req, res, next) => {
     const validated = schema.parse(req.body);
     const existing = await prisma.level.findUnique({ where: { id: levelId } });
     if (!existing) return res.status(404).json({ error: "Level not found" });
+    if (validated.withdrawalNotice !== void 0 && validated.withdrawalNotice !== null) {
+      await setLevelWithdrawalNotice(existing.levelNumber, validated.withdrawalNotice);
+    }
+    const { withdrawalNotice, ...levelUpdateData } = validated;
     const updated = await prisma.level.update({
       where: { id: levelId },
-      data: validated
+      data: levelUpdateData
     });
+    const currentNotice = await getLevelWithdrawalNotice(existing.levelNumber);
     await logAdminAction({
       adminId: req.admin.id,
       adminUsername: req.admin.username,
@@ -77415,10 +77482,13 @@ router11.put("/levels/:levelId", requireAdmin, async (req, res, next) => {
       entityType: "Level",
       entityId: levelId,
       previousState: existing,
-      newState: updated,
+      newState: { ...updated, withdrawalNotice: currentNotice },
       ipAddress: req.ip
     });
-    res.json({ message: "Level updated successfully", level: updated });
+    res.json({
+      message: "Level updated successfully",
+      level: { ...updated, withdrawalNotice: currentNotice }
+    });
   } catch (err) {
     next(err);
   }

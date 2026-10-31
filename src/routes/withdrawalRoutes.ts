@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ledgerService, InsufficientBalanceError } from '../services/ledgerService';
+import {
+  getAllLevelWithdrawalNotices,
+  getLevelWithdrawalNotice,
+} from '../services/levelNoticeService';
 
 const router = Router();
 
@@ -55,8 +59,9 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
     }
 
     const currentLevelNumber = Math.min(10, completedLevelsCount + 1);
-    const currentLevel = levels.find((l) => l.levelNumber === currentLevelNumber) || levels[0];
-    const withdrawalNotice = currentLevel?.withdrawalNotice ||
+    const notices = await getAllLevelWithdrawalNotices();
+    const withdrawalNotice =
+      notices[currentLevelNumber] ||
       (currentLevelNumber === 4
         ? 'Complete any of the tasks from Level 4 to unlock the withdrawal panel for Level 4 reward'
         : `Complete Level ${currentLevelNumber} to unlock the withdrawal panel for the withdrawal`);
@@ -73,7 +78,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,
-          notice: l.withdrawalNotice || '',
+          notice: notices[l.levelNumber] || '',
         })),
       },
     });
