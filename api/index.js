@@ -65812,6 +65812,7 @@ var taskProgressionService = {
       }
     }
     if (!isLevelUnlocked) {
+      const hideDetails = levelNumber <= 3 || !isLevel4Unlocked;
       const lockedTasks = level.tasks.map((task) => {
         const isPrepaidTask = Boolean(
           task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")
@@ -65820,13 +65821,13 @@ var taskProgressionService = {
           id: task.id,
           levelId: task.levelId,
           taskNumber: task.taskNumber,
-          title: task.title,
-          description: task.description,
-          taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
-          rewardAmount: task.rewardAmount,
+          title: hideDetails ? `Locked Task #${task.taskNumber}` : task.title,
+          description: hideDetails ? `Complete Level ${level.levelNumber - 1} to unlock this level and view task details.` : task.description,
+          taskType: hideDetails ? "Locked" : task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
+          rewardAmount: hideDetails ? 0 : task.rewardAmount,
           creditPoints: 0,
-          isPaid: Boolean(task.isPaid),
-          unlockFee: task.unlockFee || 0,
+          isPaid: hideDetails ? false : Boolean(task.isPaid),
+          unlockFee: hideDetails ? 0 : task.unlockFee || 0,
           requiresAdminApproval: task.requiresAdminApproval,
           status: task.status,
           userStatus: "LOCKED",
@@ -65901,6 +65902,7 @@ var taskProgressionService = {
       previousTaskApproved = isApproved;
       const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
       const isLocked = userStatus === "LOCKED";
+      const hideLockedTaskInL1ToL3 = isLocked && level.levelNumber <= 3;
       const isPrepaidTask = Boolean(
         task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")
       );
@@ -65908,15 +65910,13 @@ var taskProgressionService = {
         id: task.id,
         levelId: task.levelId,
         taskNumber: task.taskNumber,
-        title: task.title,
-        // Appearable! Real task title
-        description: task.description,
-        // Appearable! Real description
-        taskType: task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
-        rewardAmount: task.rewardAmount,
+        title: hideLockedTaskInL1ToL3 ? `Locked Task #${task.taskNumber}` : task.title,
+        description: hideLockedTaskInL1ToL3 ? `Complete Task #${task.taskNumber - 1} first to unlock this task and view its reward.` : task.description,
+        taskType: hideLockedTaskInL1ToL3 ? "Locked" : task.taskType || (isPrepaidTask ? "Prepaid Task" : "Task"),
+        rewardAmount: hideLockedTaskInL1ToL3 ? 0 : task.rewardAmount,
         creditPoints: 0,
-        isPaid: Boolean(task.isPaid),
-        unlockFee: task.unlockFee || 0,
+        isPaid: hideLockedTaskInL1ToL3 ? false : Boolean(task.isPaid),
+        unlockFee: hideLockedTaskInL1ToL3 ? 0 : task.unlockFee || 0,
         requiresAdminApproval: task.requiresAdminApproval,
         status: task.status,
         userStatus,
