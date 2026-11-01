@@ -74854,10 +74854,10 @@ var DATASET_10_LEVELS = [
         "task_id": 10,
         "type": "Prepaid VIP Task #10",
         "url": "https://youtu.be/K8Y2V9AwOos?si=SxysGiMzNJ9Eg2id",
-        "commission": 544,
-        "credit_points": 544,
+        "commission": 564,
+        "credit_points": 564,
         "is_prepaid": true,
-        "prepaid_value": 1360
+        "prepaid_value": 1410
       }
     ]
   },
