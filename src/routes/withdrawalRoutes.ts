@@ -159,16 +159,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         },
       });
 
-      // 4. Notification
-      await tx.notification.create({
-        data: {
-          userId,
-          title: `Withdrawal Requested: PKR ${validated.amount.toLocaleString()} 📤`,
-          message: `Your withdrawal request via ${validated.paymentMethod} has been submitted. Funds are reserved pending manual review.`,
-          notificationType: 'WITHDRAWAL_STATUS',
-        },
-      });
-
       return reqRecord;
     });
 

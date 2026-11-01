@@ -76323,14 +76323,6 @@ router5.post("/", requireAuth, async (req, res, next) => {
           status: "PENDING"
         }
       });
-      await tx.notification.create({
-        data: {
-          userId,
-          title: `Deposit Submitted: PKR ${validated.amount.toLocaleString()} \u{1F4E5}`,
-          message: `Your deposit request via ${validated.paymentMethod.replace(/_/g, " ")} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
-          notificationType: "DEPOSIT_STATUS"
-        }
-      });
       return dep;
     });
     res.status(201).json({
@@ -76687,14 +76679,6 @@ router6.post("/", requireAuth, async (req, res, next) => {
           status: "PENDING",
           relatedEntityId: reqRecord.id,
           reason: `Reserved for withdrawal request to ${validated.recipientName} (${validated.paymentMethod})`
-        }
-      });
-      await tx.notification.create({
-        data: {
-          userId,
-          title: `Withdrawal Requested: PKR ${validated.amount.toLocaleString()} \u{1F4E4}`,
-          message: `Your withdrawal request via ${validated.paymentMethod} has been submitted. Funds are reserved pending manual review.`,
-          notificationType: "WITHDRAWAL_STATUS"
         }
       });
       return reqRecord;
@@ -77160,18 +77144,52 @@ var referralRoutes_default = router8;
 // src/routes/notificationRoutes.ts
 var import_express9 = __toESM(require_express2(), 1);
 var router9 = (0, import_express9.Router)();
+function isAllowedUserNotification(n) {
+  if (n.notificationType === "ANNOUNCEMENT") return true;
+  const title = (n.title || "").toLowerCase();
+  const message = (n.message || "").toLowerCase();
+  if (n.notificationType === "DEPOSIT_STATUS") {
+    return title.includes("approved") || title.includes("rejected") || message.includes("approved") || message.includes("rejected");
+  }
+  if (n.notificationType === "WITHDRAWAL_STATUS") {
+    return title.includes("approved") || title.includes("rejected") || title.includes("disbursed") || title.includes("paid") || message.includes("approved") || message.includes("rejected") || message.includes("disbursed") || message.includes("paid");
+  }
+  return false;
+}
 router9.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const notifications = await prisma.notification.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: 50
-    });
-    const unreadCount = await prisma.notification.count({
-      where: { userId, isRead: false }
-    });
-    res.json({ notifications, unreadCount });
+    const [rawNotifications, activeAnnouncements] = await Promise.all([
+      prisma.notification.findMany({
+        where: {
+          userId,
+          notificationType: { in: ["DEPOSIT_STATUS", "WITHDRAWAL_STATUS", "ANNOUNCEMENT"] }
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100
+      }),
+      prisma.announcement.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: 10
+      })
+    ]);
+    const userNotifications = rawNotifications.filter(isAllowedUserNotification);
+    const announcementNotifications = activeAnnouncements.map((a) => ({
+      id: `announcement_${a.id}`,
+      userId,
+      title: a.title.startsWith("\u{1F4E2}") ? a.title : `\u{1F4E2} Announcement: ${a.title}`,
+      message: a.content,
+      notificationType: "ANNOUNCEMENT",
+      isRead: false,
+      createdAt: a.createdAt,
+      isAnnouncement: true
+    }));
+    const combined = [...announcementNotifications, ...userNotifications].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const unreadCount = combined.filter((n) => !n.isRead).length;
+    res.json({ notifications: combined, unreadCount });
   } catch (err) {
     next(err);
   }
@@ -77180,6 +77198,9 @@ router9.put("/:id/read", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const id = req.params.id;
+    if (id.startsWith("announcement_")) {
+      return res.json({ message: "Marked as read" });
+    }
     await prisma.notification.updateMany({
       where: { id, userId },
       data: { isRead: true }
@@ -77193,7 +77214,11 @@ router9.put("/read-all", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     await prisma.notification.updateMany({
-      where: { userId, isRead: false },
+      where: {
+        userId,
+        isRead: false,
+        notificationType: { in: ["DEPOSIT_STATUS", "WITHDRAWAL_STATUS", "ANNOUNCEMENT"] }
+      },
       data: { isRead: true }
     });
     res.json({ message: "All notifications marked as read" });
@@ -78507,11 +78532,14 @@ router11.put("/deposits/:depositId/review", requireAdmin, async (req, res, next)
             notes: reviewNotes
           }
         });
+        const depositComment = reviewNotes?.trim() ? `
+
+Admin Comment: ${reviewNotes.trim()}` : "";
         await tx.notification.create({
           data: {
             userId: deposit.userId,
             title: `Deposit Approved: PKR ${deposit.amount.toLocaleString()} \u2705`,
-            message: `Your deposit of PKR ${deposit.amount.toLocaleString()} has been approved and added to your available balance.`,
+            message: `Your deposit of PKR ${deposit.amount.toLocaleString()} has been approved and added to your available balance.${depositComment}`,
             notificationType: "DEPOSIT_STATUS"
           }
         });
@@ -78545,11 +78573,14 @@ router11.put("/deposits/:depositId/review", requireAdmin, async (req, res, next)
             reviewNotes: reviewNotes || "Transaction details could not be verified"
           }
         });
+        const depositRejectComment = reviewNotes?.trim() || "Verification unconfirmed.";
         await tx.notification.create({
           data: {
             userId: deposit.userId,
             title: `Deposit Rejected \u274C`,
-            message: `Your deposit request for PKR ${deposit.amount.toLocaleString()} was rejected. Reason: ${reviewNotes || "Verification unconfirmed."}`,
+            message: `Your deposit request for PKR ${deposit.amount.toLocaleString()} was rejected.
+
+Admin Comment: ${depositRejectComment}`,
             notificationType: "DEPOSIT_STATUS"
           }
         });
@@ -78663,11 +78694,14 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
               notes: reviewNotes
             }
           });
+          const l2Comment = reviewNotes?.trim() ? `
+
+Admin Comment: ${reviewNotes.trim()}` : "";
           await tx.notification.create({
             data: {
               userId: withdrawal.userId,
               title: `Level 2 Withdrawal Approved! (10% Payout) \u2705`,
-              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.`,
+              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.${l2Comment}`,
               notificationType: "WITHDRAWAL_STATUS"
             }
           });
@@ -78698,11 +78732,14 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
           reviewNotes: reviewNotes || null
         }
       });
+      const withdrawApproveComment = reviewNotes?.trim() ? `
+
+Admin Comment: ${reviewNotes.trim()}` : "";
       await prisma.notification.create({
         data: {
           userId: withdrawal.userId,
           title: `Withdrawal Approved! \u2705`,
-          message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} has been approved. Payment processing is underway.`,
+          message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} has been approved. Payment processing is underway.${withdrawApproveComment}`,
           notificationType: "WITHDRAWAL_STATUS"
         }
       });
@@ -78750,11 +78787,14 @@ router11.put("/withdrawals/:withdrawalId/review", requireAdmin, async (req, res,
             notes: reviewNotes
           }
         });
+        const withdrawRejectComment = reviewNotes?.trim() || "Withdrawal rejected by administrator.";
         await tx.notification.create({
           data: {
             userId: withdrawal.userId,
             title: `Withdrawal Rejected - Funds Restored \u{1F504}`,
-            message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} was rejected. Reserved funds have been restored to your available balance.`,
+            message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} was rejected. Reserved funds have been restored to your available balance.
+
+Admin Comment: ${withdrawRejectComment}`,
             notificationType: "WITHDRAWAL_STATUS"
           }
         });
@@ -78824,11 +78864,14 @@ router11.put("/withdrawals/:withdrawalId/payout", requireAdmin, async (req, res,
           notes: reviewNotes
         }
       });
+      const payoutComment = reviewNotes?.trim() ? `
+
+Admin Comment: ${reviewNotes.trim()}` : "";
       await tx.notification.create({
         data: {
           userId: withdrawal.userId,
           title: `Withdrawal Disbursed: PKR ${withdrawal.amount.toLocaleString()} \u{1F4B8}`,
-          message: `Your payment of PKR ${withdrawal.amount.toLocaleString()} has been sent! Trx Reference: ${payoutReference.trim()}`,
+          message: `Your payment of PKR ${withdrawal.amount.toLocaleString()} has been sent! Trx Reference: ${payoutReference.trim()}.${payoutComment}`,
           notificationType: "WITHDRAWAL_STATUS"
         }
       });
@@ -79425,8 +79468,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/main-C4zZQggc.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/main-Dej6VYEs.css">
+    <script type="module" crossorigin src="/assets/main-DdTqJtDZ.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/main-BGm-DLJ3.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>
@@ -79569,11 +79612,11 @@ function createApp() {
   app2.use(import_express13.default.static(path4.resolve(process.cwd(), "public")));
   app2.use("/assets", (req, res, next) => {
     if (req.method === "GET" || req.method === "HEAD") {
-      if (req.path.endsWith(".js") && !req.path.includes("main-C4zZQggc.js")) {
-        return res.redirect(302, "/assets/main-C4zZQggc.js");
+      if (req.path.endsWith(".js") && !req.path.includes("main-DdTqJtDZ.js")) {
+        return res.redirect(302, "/assets/main-DdTqJtDZ.js");
       }
-      if (req.path.endsWith(".css") && !req.path.includes("main-Dej6VYEs.css")) {
-        return res.redirect(302, "/assets/main-Dej6VYEs.css");
+      if (req.path.endsWith(".css") && !req.path.includes("main-BGm-DLJ3.css")) {
+        return res.redirect(302, "/assets/main-BGm-DLJ3.css");
       }
       return res.status(404).end();
     }

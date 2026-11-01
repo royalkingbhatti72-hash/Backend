@@ -5,22 +5,82 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 const router = Router();
 
 /**
+ * Helper to determine if a notification is permitted to be shown to the user.
+ * Only Deposit Approved/Rejected, Withdrawal Approved/Rejected, and Announcements are allowed.
+ * Any other activity is excluded.
+ */
+function isAllowedUserNotification(n: { notificationType: string; title: string; message: string }): boolean {
+  if (n.notificationType === 'ANNOUNCEMENT') return true;
+  const title = (n.title || '').toLowerCase();
+  const message = (n.message || '').toLowerCase();
+
+  if (n.notificationType === 'DEPOSIT_STATUS') {
+    return title.includes('approved') || title.includes('rejected') || message.includes('approved') || message.includes('rejected');
+  }
+
+  if (n.notificationType === 'WITHDRAWAL_STATUS') {
+    return (
+      title.includes('approved') ||
+      title.includes('rejected') ||
+      title.includes('disbursed') ||
+      title.includes('paid') ||
+      message.includes('approved') ||
+      message.includes('rejected') ||
+      message.includes('disbursed') ||
+      message.includes('paid')
+    );
+  }
+
+  return false;
+}
+
+/**
  * GET /api/notifications
+ * Returns ONLY deposit and withdrawal approved/rejected notifications and announcements.
  */
 router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
   try {
     const userId = req.user!.id;
-    const notifications = await prisma.notification.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
 
-    const unreadCount = await prisma.notification.count({
-      where: { userId, isRead: false },
-    });
+    const [rawNotifications, activeAnnouncements] = await Promise.all([
+      prisma.notification.findMany({
+        where: {
+          userId,
+          notificationType: { in: ['DEPOSIT_STATUS', 'WITHDRAWAL_STATUS', 'ANNOUNCEMENT'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      prisma.announcement.findMany({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+    ]);
 
-    res.json({ notifications, unreadCount });
+    // Strictly filter to approved and rejected statuses
+    const userNotifications = rawNotifications.filter(isAllowedUserNotification);
+
+    // Map system announcements into user notification format
+    const announcementNotifications = activeAnnouncements.map((a) => ({
+      id: `announcement_${a.id}`,
+      userId,
+      title: a.title.startsWith('📢') ? a.title : `📢 Announcement: ${a.title}`,
+      message: a.content,
+      notificationType: 'ANNOUNCEMENT',
+      isRead: false,
+      createdAt: a.createdAt,
+      isAnnouncement: true,
+    }));
+
+    // Merge announcements and transaction notifications, sorted by createdAt desc
+    const combined = [...announcementNotifications, ...userNotifications].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const unreadCount = combined.filter((n) => !n.isRead).length;
+
+    res.json({ notifications: combined, unreadCount });
   } catch (err) {
     next(err);
   }
@@ -33,6 +93,10 @@ router.put('/:id/read', requireAuth, async (req: AuthRequest, res: Response, nex
   try {
     const userId = req.user!.id;
     const id = req.params.id as string;
+
+    if (id.startsWith('announcement_')) {
+      return res.json({ message: 'Marked as read' });
+    }
 
     await prisma.notification.updateMany({
       where: { id, userId },
@@ -53,7 +117,11 @@ router.put('/read-all', requireAuth, async (req: AuthRequest, res: Response, nex
     const userId = req.user!.id;
 
     await prisma.notification.updateMany({
-      where: { userId, isRead: false },
+      where: {
+        userId,
+        isRead: false,
+        notificationType: { in: ['DEPOSIT_STATUS', 'WITHDRAWAL_STATUS', 'ANNOUNCEMENT'] },
+      },
       data: { isRead: true },
     });
 

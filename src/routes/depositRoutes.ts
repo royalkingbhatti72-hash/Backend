@@ -142,15 +142,6 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         },
       });
 
-      await tx.notification.create({
-        data: {
-          userId,
-          title: `Deposit Submitted: PKR ${validated.amount.toLocaleString()} 📥`,
-          message: `Your deposit request via ${validated.paymentMethod.replace(/_/g, ' ')} (Ref: ${validated.transactionReference}) is pending administrator verification.`,
-          notificationType: 'DEPOSIT_STATUS',
-        },
-      });
-
       return dep;
     });
 

@@ -1419,11 +1419,12 @@ router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthReq
         });
 
         // Notification
+        const depositComment = reviewNotes?.trim() ? `\n\nAdmin Comment: ${reviewNotes.trim()}` : '';
         await tx.notification.create({
           data: {
             userId: deposit.userId,
             title: `Deposit Approved: PKR ${deposit.amount.toLocaleString()} ✅`,
-            message: `Your deposit of PKR ${deposit.amount.toLocaleString()} has been approved and added to your available balance.`,
+            message: `Your deposit of PKR ${deposit.amount.toLocaleString()} has been approved and added to your available balance.${depositComment}`,
             notificationType: 'DEPOSIT_STATUS',
           },
         });
@@ -1465,11 +1466,12 @@ router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthReq
           },
         });
 
+        const depositRejectComment = reviewNotes?.trim() || 'Verification unconfirmed.';
         await tx.notification.create({
           data: {
             userId: deposit.userId,
             title: `Deposit Rejected ❌`,
-            message: `Your deposit request for PKR ${deposit.amount.toLocaleString()} was rejected. Reason: ${reviewNotes || 'Verification unconfirmed.'}`,
+            message: `Your deposit request for PKR ${deposit.amount.toLocaleString()} was rejected.\n\nAdmin Comment: ${depositRejectComment}`,
             notificationType: 'DEPOSIT_STATUS',
           },
         });
@@ -1605,11 +1607,12 @@ router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminA
             },
           });
 
+          const l2Comment = reviewNotes?.trim() ? `\n\nAdmin Comment: ${reviewNotes.trim()}` : '';
           await tx.notification.create({
             data: {
               userId: withdrawal.userId,
               title: `Level 2 Withdrawal Approved! (10% Payout) ✅`,
-              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.`,
+              message: `Your Level 2 withdrawal has been approved! PKR ${payoutAmount.toLocaleString()} (10%) is approved for payout, and PKR ${refundAmount.toLocaleString()} (90%) has been restored to your account balance.${l2Comment}`,
               notificationType: 'WITHDRAWAL_STATUS',
             },
           });
@@ -1646,11 +1649,12 @@ router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminA
         },
       });
 
+      const withdrawApproveComment = reviewNotes?.trim() ? `\n\nAdmin Comment: ${reviewNotes.trim()}` : '';
       await prisma.notification.create({
         data: {
           userId: withdrawal.userId,
           title: `Withdrawal Approved! ✅`,
-          message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} has been approved. Payment processing is underway.`,
+          message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} has been approved. Payment processing is underway.${withdrawApproveComment}`,
           notificationType: 'WITHDRAWAL_STATUS',
         },
       });
@@ -1706,11 +1710,12 @@ router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminA
           },
         });
 
+        const withdrawRejectComment = reviewNotes?.trim() || 'Withdrawal rejected by administrator.';
         await tx.notification.create({
           data: {
             userId: withdrawal.userId,
             title: `Withdrawal Rejected - Funds Restored 🔄`,
-            message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} was rejected. Reserved funds have been restored to your available balance.`,
+            message: `Your withdrawal of PKR ${withdrawal.amount.toLocaleString()} was rejected. Reserved funds have been restored to your available balance.\n\nAdmin Comment: ${withdrawRejectComment}`,
             notificationType: 'WITHDRAWAL_STATUS',
           },
         });
@@ -1791,11 +1796,12 @@ router.put('/withdrawals/:withdrawalId/payout', requireAdmin, async (req: AdminA
         },
       });
 
+      const payoutComment = reviewNotes?.trim() ? `\n\nAdmin Comment: ${reviewNotes.trim()}` : '';
       await tx.notification.create({
         data: {
           userId: withdrawal.userId,
           title: `Withdrawal Disbursed: PKR ${withdrawal.amount.toLocaleString()} 💸`,
-          message: `Your payment of PKR ${withdrawal.amount.toLocaleString()} has been sent! Trx Reference: ${payoutReference.trim()}`,
+          message: `Your payment of PKR ${withdrawal.amount.toLocaleString()} has been sent! Trx Reference: ${payoutReference.trim()}.${payoutComment}`,
           notificationType: 'WITHDRAWAL_STATUS',
         },
       });
