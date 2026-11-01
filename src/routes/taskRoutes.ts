@@ -75,7 +75,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
     const level1Completed = levelStats.get(1)?.isCompleted || false;
     const level2Completed = level1Completed && (levelStats.get(2)?.isCompleted || false);
     const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
-    const isLevel4Unlocked = level3Completed;
+    const level4Completed = level3Completed && (levelStats.get(4)?.isCompleted || false);
 
     const hasWithdrawnLevel1 = userWithdrawals.length > 0;
 
@@ -92,9 +92,23 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
         }
       } else if (lvl.levelNumber === 3) {
         isUnlocked = level2Completed;
+      } else if (lvl.levelNumber === 4) {
+        isUnlocked = level3Completed;
+        if (!isUnlocked) {
+          lockReason = 'Complete all tasks in Level 3 first to unlock Level 4.';
+        }
+      } else if (lvl.levelNumber === 5) {
+        // Level 5 unlocks when any one task in Level 4 is completed
+        isUnlocked = level4Completed;
+        if (!isUnlocked) {
+          lockReason = 'Complete any one task in Level 4 to unlock Level 5.';
+        }
       } else {
-        // Levels 4 through 10: all unlocked as soon as Level 4 is unlocked (Level 3 completed)!
-        isUnlocked = isLevel4Unlocked;
+        const prevLevelCompleted = levelStats.get(lvl.levelNumber - 1)?.isCompleted || false;
+        isUnlocked = prevLevelCompleted;
+        if (!isUnlocked) {
+          lockReason = `Complete all tasks in Level ${lvl.levelNumber - 1} first to unlock Level ${lvl.levelNumber}.`;
+        }
       }
 
       return {
@@ -256,6 +270,21 @@ router.post('/:taskId/unlock', requireAuth, async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: 'This task is already awaiting admin approval' });
     }
 
+    if (task.level.levelNumber === 4) {
+      const otherApproved = tasks.some((t) => t.id !== task.id && t.userStatus === 'APPROVED');
+      if (otherApproved) {
+        return res.status(403).json({
+          error: 'Level 4 allows only one task to be completed. You have already completed your Level 4 task. Please proceed to Level 5!',
+        });
+      }
+      const otherPending = tasks.some((t) => t.id !== task.id && t.userStatus === 'PENDING_VERIFICATION');
+      if (otherPending) {
+        return res.status(403).json({
+          error: 'You have already submitted a Level 4 task awaiting approval. Only one task can be completed in Level 4.',
+        });
+      }
+    }
+
     if (evaluated.userStatus === 'LOCKED') {
       return res.status(403).json({ error: evaluated.lockMessage || 'Prerequisite tasks must be approved before unlocking this task' });
     }
@@ -392,6 +421,21 @@ router.post('/:taskId/submit', requireAuth, async (req: AuthRequest, res: Respon
 
     if (evaluated.userStatus === 'PENDING_VERIFICATION') {
       return res.status(400).json({ error: 'A submission for this task is already awaiting admin verification' });
+    }
+
+    if (task.level.levelNumber === 4) {
+      const otherApproved = tasks.some((t) => t.id !== task.id && t.userStatus === 'APPROVED');
+      if (otherApproved) {
+        return res.status(403).json({
+          error: 'Level 4 allows only one task to be completed. You have already completed your Level 4 task. Please proceed to Level 5!',
+        });
+      }
+      const otherPending = tasks.some((t) => t.id !== task.id && t.userStatus === 'PENDING_VERIFICATION');
+      if (otherPending) {
+        return res.status(403).json({
+          error: 'You have already submitted a Level 4 task awaiting approval. Only one task can be completed in Level 4.',
+        });
+      }
     }
 
     if (evaluated.userStatus === 'LOCKED') {

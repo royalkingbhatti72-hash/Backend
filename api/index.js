@@ -66069,7 +66069,7 @@ var taskProgressionService = {
     ]);
     const approvedTasksByLevelId = /* @__PURE__ */ new Map();
     for (const p of userTaskProgressList) {
-      if (p.task?.levelId && p.task?.id) {
+      if ((!p.status || p.status === "APPROVED") && p.task?.levelId && p.task?.id) {
         if (!approvedTasksByLevelId.has(p.task.levelId)) {
           approvedTasksByLevelId.set(p.task.levelId, /* @__PURE__ */ new Set());
         }
@@ -66077,7 +66077,7 @@ var taskProgressionService = {
       }
     }
     for (const s of userSubmissionsList) {
-      if (s.task?.levelId && s.task?.id) {
+      if ((!s.status || s.status === "APPROVED") && s.task?.levelId && s.task?.id) {
         if (!approvedTasksByLevelId.has(s.task.levelId)) {
           approvedTasksByLevelId.set(s.task.levelId, /* @__PURE__ */ new Set());
         }
@@ -66099,6 +66099,7 @@ var taskProgressionService = {
     const l1Completed = levelStatsByNumber.get(1)?.isCompleted || false;
     const l2Completed = l1Completed && (levelStatsByNumber.get(2)?.isCompleted || false);
     const l3Completed = l2Completed && (levelStatsByNumber.get(3)?.isCompleted || false);
+    const l4Completed = l3Completed && (levelStatsByNumber.get(4)?.isCompleted || false);
     const isLevel4Unlocked = l3Completed;
     const hasWithdrawnLevel1 = userWithdrawalsList.length > 0;
     let isLevelUnlocked = false;
@@ -66108,8 +66109,13 @@ var taskProgressionService = {
       isLevelUnlocked = l1Completed && hasWithdrawnLevel1;
     } else if (levelNumber === 3) {
       isLevelUnlocked = l2Completed;
+    } else if (levelNumber === 4) {
+      isLevelUnlocked = l3Completed;
+    } else if (levelNumber === 5) {
+      isLevelUnlocked = l4Completed;
     } else {
-      isLevelUnlocked = isLevel4Unlocked;
+      const prevLvlCompleted = levelStatsByNumber.get(levelNumber - 1)?.isCompleted || false;
+      isLevelUnlocked = prevLvlCompleted;
     }
     let isTask1Eligible = false;
     let task1LockMessage = "";
@@ -66117,6 +66123,8 @@ var taskProgressionService = {
       isTask1Eligible = false;
       if (levelNumber === 2 && l1Completed && !hasWithdrawnLevel1) {
         task1LockMessage = "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.";
+      } else if (levelNumber === 5 && !l4Completed) {
+        task1LockMessage = "Complete any one task in Level 4 to unlock Level 5 tasks.";
       } else {
         task1LockMessage = `Level ${levelNumber} is locked. Complete all tasks in Level ${levelNumber - 1} first.`;
       }
@@ -66142,8 +66150,7 @@ var taskProgressionService = {
         task1LockMessage = "Complete all tasks in Level 3 first to unlock Level 4 tasks.";
       }
     } else if (levelNumber === 5) {
-      const l4ApprovedCount = levelStatsByNumber.get(4)?.approvedCount || 0;
-      isTask1Eligible = l4ApprovedCount >= 1;
+      isTask1Eligible = l4Completed;
       if (!isTask1Eligible) {
         task1LockMessage = "Complete at least one Level 4 prepaid task to unlock Level 5 task participation.";
       }
@@ -66198,6 +66205,16 @@ var taskProgressionService = {
     }
     const evaluatedTasks = [];
     let previousTaskApproved = isTask1Eligible;
+    const l4ApprovedTask = level.levelNumber === 4 ? level.tasks.find((t) => {
+      const p = progressMap.get(t.id);
+      const s = submissionMap.get(t.id);
+      return p?.status === "APPROVED" || s?.status === "APPROVED";
+    }) : null;
+    const l4PendingTask = level.levelNumber === 4 ? level.tasks.find((t) => {
+      const p = progressMap.get(t.id);
+      const s = submissionMap.get(t.id);
+      return (s?.status === "PENDING" || p?.status === "PENDING_VERIFICATION") && p?.status !== "APPROVED" && s?.status !== "APPROVED";
+    }) : null;
     for (const task of level.tasks) {
       const progress = progressMap.get(task.id);
       const submission = submissionMap.get(task.id);
@@ -66207,14 +66224,66 @@ var taskProgressionService = {
       let isPrerequisiteSatisfied = false;
       let taskLockMessage = "";
       if (level.levelNumber === 4) {
-        isPrerequisiteSatisfied = isTask1Eligible;
-        if (!isPrerequisiteSatisfied) {
-          taskLockMessage = task1LockMessage;
+        if (l4ApprovedTask) {
+          if (task.id === l4ApprovedTask.id) {
+            userStatus = "APPROVED";
+            isPrerequisiteSatisfied = true;
+          } else {
+            userStatus = "LOCKED";
+            isPrerequisiteSatisfied = false;
+            taskLockMessage = "Level 4 allows only one task to be completed. You have already completed your Level 4 task. Please proceed to Level 5!";
+          }
+        } else if (l4PendingTask) {
+          if (task.id === l4PendingTask.id) {
+            userStatus = "PENDING_VERIFICATION";
+            isPrerequisiteSatisfied = true;
+          } else {
+            userStatus = "LOCKED";
+            isPrerequisiteSatisfied = false;
+            taskLockMessage = "You have already submitted a Level 4 task awaiting approval. Only one task can be completed in Level 4.";
+          }
+        } else {
+          isPrerequisiteSatisfied = isTask1Eligible;
+          if (!isPrerequisiteSatisfied) {
+            taskLockMessage = task1LockMessage;
+          }
+          if (task.status === "DISABLED") {
+            userStatus = "DISABLED";
+          } else if (isApproved) {
+            userStatus = "APPROVED";
+          } else if (submission?.status === "PENDING" || progress?.status === "PENDING_VERIFICATION") {
+            userStatus = "PENDING_VERIFICATION";
+          } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
+            userStatus = "REJECTED";
+          } else if (isPrerequisiteSatisfied) {
+            userStatus = "AVAILABLE";
+            if (task.isPaid && isPaidUnlocked) {
+              isPaidUnlocked = true;
+            }
+          } else {
+            userStatus = "LOCKED";
+          }
         }
       } else if (task.taskNumber === 1) {
         isPrerequisiteSatisfied = isTask1Eligible;
         if (!isPrerequisiteSatisfied) {
           taskLockMessage = task1LockMessage;
+        }
+        if (task.status === "DISABLED") {
+          userStatus = "DISABLED";
+        } else if (isApproved) {
+          userStatus = "APPROVED";
+        } else if (submission?.status === "PENDING" || progress?.status === "PENDING_VERIFICATION") {
+          userStatus = "PENDING_VERIFICATION";
+        } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
+          userStatus = "REJECTED";
+        } else if (isPrerequisiteSatisfied) {
+          userStatus = "AVAILABLE";
+          if (task.isPaid && isPaidUnlocked) {
+            isPaidUnlocked = true;
+          }
+        } else {
+          userStatus = "LOCKED";
         }
       } else {
         const prevTask = level.tasks.find((t) => t.taskNumber === task.taskNumber - 1);
@@ -66225,22 +66294,22 @@ var taskProgressionService = {
         if (!isPrerequisiteSatisfied) {
           taskLockMessage = `Task #${task.taskNumber} is locked. Complete Task #${task.taskNumber - 1} first in proper sequence.`;
         }
-      }
-      if (task.status === "DISABLED") {
-        userStatus = "DISABLED";
-      } else if (isApproved) {
-        userStatus = "APPROVED";
-      } else if (submission?.status === "PENDING" || progress?.status === "PENDING_VERIFICATION") {
-        userStatus = "PENDING_VERIFICATION";
-      } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
-        userStatus = "REJECTED";
-      } else if (isPrerequisiteSatisfied) {
-        userStatus = "AVAILABLE";
-        if (task.isPaid && isPaidUnlocked) {
-          isPaidUnlocked = true;
+        if (task.status === "DISABLED") {
+          userStatus = "DISABLED";
+        } else if (isApproved) {
+          userStatus = "APPROVED";
+        } else if (submission?.status === "PENDING" || progress?.status === "PENDING_VERIFICATION") {
+          userStatus = "PENDING_VERIFICATION";
+        } else if (progress?.status === "REJECTED" || submission?.status === "REJECTED") {
+          userStatus = "REJECTED";
+        } else if (isPrerequisiteSatisfied) {
+          userStatus = "AVAILABLE";
+          if (task.isPaid && isPaidUnlocked) {
+            isPaidUnlocked = true;
+          }
+        } else {
+          userStatus = "LOCKED";
         }
-      } else {
-        userStatus = "LOCKED";
       }
       previousTaskApproved = isApproved;
       const hasAccessToProtectedContent = ["UNLOCKED", "AVAILABLE", "IN_PROGRESS", "PENDING_VERIFICATION", "APPROVED", "REJECTED", "AWAITING_PAYMENT"].includes(userStatus);
@@ -75726,7 +75795,7 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
     const level1Completed = levelStats.get(1)?.isCompleted || false;
     const level2Completed = level1Completed && (levelStats.get(2)?.isCompleted || false);
     const level3Completed = level2Completed && (levelStats.get(3)?.isCompleted || false);
-    const isLevel4Unlocked = level3Completed;
+    const level4Completed = level3Completed && (levelStats.get(4)?.isCompleted || false);
     const hasWithdrawnLevel1 = userWithdrawals.length > 0;
     const levelsWithProgress = levels.map((lvl) => {
       const stats = levelStats.get(lvl.levelNumber);
@@ -75741,8 +75810,22 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
         }
       } else if (lvl.levelNumber === 3) {
         isUnlocked = level2Completed;
+      } else if (lvl.levelNumber === 4) {
+        isUnlocked = level3Completed;
+        if (!isUnlocked) {
+          lockReason = "Complete all tasks in Level 3 first to unlock Level 4.";
+        }
+      } else if (lvl.levelNumber === 5) {
+        isUnlocked = level4Completed;
+        if (!isUnlocked) {
+          lockReason = "Complete any one task in Level 4 to unlock Level 5.";
+        }
       } else {
-        isUnlocked = isLevel4Unlocked;
+        const prevLevelCompleted = levelStats.get(lvl.levelNumber - 1)?.isCompleted || false;
+        isUnlocked = prevLevelCompleted;
+        if (!isUnlocked) {
+          lockReason = `Complete all tasks in Level ${lvl.levelNumber - 1} first to unlock Level ${lvl.levelNumber}.`;
+        }
       }
       return {
         id: lvl.id,
@@ -75860,6 +75943,20 @@ router3.post("/:taskId/unlock", requireAuth, async (req, res, next) => {
     if (evaluated.userStatus === "PENDING_VERIFICATION") {
       return res.status(400).json({ error: "This task is already awaiting admin approval" });
     }
+    if (task.level.levelNumber === 4) {
+      const otherApproved = tasks.some((t) => t.id !== task.id && t.userStatus === "APPROVED");
+      if (otherApproved) {
+        return res.status(403).json({
+          error: "Level 4 allows only one task to be completed. You have already completed your Level 4 task. Please proceed to Level 5!"
+        });
+      }
+      const otherPending = tasks.some((t) => t.id !== task.id && t.userStatus === "PENDING_VERIFICATION");
+      if (otherPending) {
+        return res.status(403).json({
+          error: "You have already submitted a Level 4 task awaiting approval. Only one task can be completed in Level 4."
+        });
+      }
+    }
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "Prerequisite tasks must be approved before unlocking this task" });
     }
@@ -75974,6 +76071,20 @@ router3.post("/:taskId/submit", requireAuth, async (req, res, next) => {
     }
     if (evaluated.userStatus === "PENDING_VERIFICATION") {
       return res.status(400).json({ error: "A submission for this task is already awaiting admin verification" });
+    }
+    if (task.level.levelNumber === 4) {
+      const otherApproved = tasks.some((t) => t.id !== task.id && t.userStatus === "APPROVED");
+      if (otherApproved) {
+        return res.status(403).json({
+          error: "Level 4 allows only one task to be completed. You have already completed your Level 4 task. Please proceed to Level 5!"
+        });
+      }
+      const otherPending = tasks.some((t) => t.id !== task.id && t.userStatus === "PENDING_VERIFICATION");
+      if (otherPending) {
+        return res.status(403).json({
+          error: "You have already submitted a Level 4 task awaiting approval. Only one task can be completed in Level 4."
+        });
+      }
     }
     if (evaluated.userStatus === "LOCKED") {
       return res.status(403).json({ error: evaluated.lockMessage || "This task is locked" });
