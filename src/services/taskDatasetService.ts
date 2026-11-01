@@ -8,7 +8,7 @@ let datasetSynced = false;
  * Enforces:
  * - Level 1: 10 free tasks (Rs 15 each). All 10 required to unlock Level 2.
  * - Level 2: Tasks 1-9 free (Rs 40 each), Task 10 prepaid (Rs 1,360, 40% commission = Rs 544). All 10 required to unlock Level 3.
- * - Level 3: Tasks 1-8 free (Rs 60 each), Task 9 prepaid (Rs 3,500, 40% = Rs 1,400), Task 10 prepaid (Rs 5,500, 40% = Rs 2,200). All 10 required to finish Level 3.
+ * - Level 3: Tasks 1-8 free (Rs 60 each), Task 9 prepaid (Rs 6,257, 40% = Rs 2,503), Task 10 prepaid (Rs 14,260, 40% = Rs 5,704). All 10 required to finish Level 3.
  * - Level 4: 10 prepaid tasks (Rs 10k to 200k, 40% commission). All 10 visible and selectable. Completing 1 task unlocks Level 5.
  * - Levels 5 to 10: 10 free tasks each with no prepaid charges. All tasks visible. Unspecified rewards (no invented numbers).
  */

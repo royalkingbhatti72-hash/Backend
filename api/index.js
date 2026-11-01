@@ -74936,19 +74936,19 @@ var DATASET_10_LEVELS = [
         "task_id": 9,
         "type": "Prepaid VIP Task #9",
         "url": "https://youtu.be/F7sPLM-ThnA?si=GozFZ1wHIl4HPnSL",
-        "commission": 1400,
-        "credit_points": 1400,
+        "commission": 2503,
+        "credit_points": 2503,
         "is_prepaid": true,
-        "prepaid_value": 3500
+        "prepaid_value": 6257
       },
       {
         "task_id": 10,
         "type": "Prepaid VIP Task #10",
         "url": "https://youtu.be/8T0m8f44Kgs?si=XPXvxc3B5IOOXrP-",
-        "commission": 2200,
-        "credit_points": 2200,
+        "commission": 5704,
+        "credit_points": 5704,
         "is_prepaid": true,
-        "prepaid_value": 5500
+        "prepaid_value": 14260
       }
     ]
   },

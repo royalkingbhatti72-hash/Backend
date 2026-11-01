@@ -24,7 +24,7 @@ The workspace (`/Users/mmaazfalak/antigravity/Project55`) contains **two indepen
 - **Zero Level Completion Rewards**: `Level.completionReward = 0` across all 10 levels. Users **only** earn rewards per individual task (`Task.rewardAmount`). Never credit or display a level completion bonus.
 - **Level 1**: 10 free tasks (`isPaid = false`, `unlockFee = 0`), each rewarding **PKR 15** (`rewardAmount = 15`). All 10 tasks must be `APPROVED` to unlock Level 2.
 - **Level 2**: Tasks 1–9 are free (`rewardAmount = 40`). **Task 10 is prepaid** costing **PKR 1,410** (`isPaid = true`, `unlockFee = 1410`) with a 40% commission of **PKR 564** (`rewardAmount = 564`). All 10 tasks must be `APPROVED` to unlock Level 3.
-- **Level 3**: Tasks 1–8 are free (`rewardAmount = 60`). **Task 9 is prepaid** costing **PKR 3,500** with a 40% commission of **PKR 1,400**. **Task 10 is prepaid** costing **PKR 5,500** with a 40% commission of **PKR 2,200**. All 10 tasks must be `APPROVED` to finish Level 3.
+- **Level 3**: Tasks 1–8 are free (`rewardAmount = 60`). **Task 9 is prepaid** costing **PKR 6,257** with a 40% commission of **PKR 2,503**. **Task 10 is prepaid** costing **PKR 14,260** with a 40% commission of **PKR 5,704**. All 10 tasks must be `APPROVED` to finish Level 3.
 - **Level 4 (VIP Prepaid Tier)**: 10 prepaid tasks (`isPaid = true`), each paying **40% commission**:
   - Task 1: Fee `10,000` $\rightarrow$ Reward `4,000`
   - Task 2: Fee `20,000` $\rightarrow$ Reward `8,000`
