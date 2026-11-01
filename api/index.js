@@ -66035,7 +66035,7 @@ var taskProgressionService = {
       }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: "APPROVED" },
-        select: { task: { select: { levelId: true, id: true } } }
+        select: { status: true, task: { select: { levelId: true, id: true } } }
       }),
       prisma.userLevelProgress.findMany({
         where: { userId },
@@ -66043,7 +66043,7 @@ var taskProgressionService = {
       }),
       prisma.taskSubmission.findMany({
         where: { userId, status: "APPROVED" },
-        select: { task: { select: { levelId: true, id: true } } }
+        select: { status: true, task: { select: { levelId: true, id: true } } }
       }),
       prisma.wallet.findUnique({
         where: { userId },
@@ -66069,7 +66069,7 @@ var taskProgressionService = {
     ]);
     const approvedTasksByLevelId = /* @__PURE__ */ new Map();
     for (const p of userTaskProgressList) {
-      if ((!p.status || p.status === "APPROVED") && p.task?.levelId && p.task?.id) {
+      if (p.status === "APPROVED" && p.task?.levelId && p.task?.id) {
         if (!approvedTasksByLevelId.has(p.task.levelId)) {
           approvedTasksByLevelId.set(p.task.levelId, /* @__PURE__ */ new Set());
         }
@@ -66077,7 +66077,7 @@ var taskProgressionService = {
       }
     }
     for (const s of userSubmissionsList) {
-      if ((!s.status || s.status === "APPROVED") && s.task?.levelId && s.task?.id) {
+      if (s.status === "APPROVED" && s.task?.levelId && s.task?.id) {
         if (!approvedTasksByLevelId.has(s.task.levelId)) {
           approvedTasksByLevelId.set(s.task.levelId, /* @__PURE__ */ new Set());
         }

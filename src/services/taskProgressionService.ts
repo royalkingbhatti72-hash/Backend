@@ -60,7 +60,7 @@ export const taskProgressionService = {
       }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: 'APPROVED' },
-        select: { task: { select: { levelId: true, id: true } } },
+        select: { status: true, task: { select: { levelId: true, id: true } } },
       }),
       prisma.userLevelProgress.findMany({
         where: { userId },
@@ -68,7 +68,7 @@ export const taskProgressionService = {
       }),
       prisma.taskSubmission.findMany({
         where: { userId, status: 'APPROVED' },
-        select: { task: { select: { levelId: true, id: true } } },
+        select: { status: true, task: { select: { levelId: true, id: true } } },
       }),
       prisma.wallet.findUnique({
         where: { userId },
@@ -96,7 +96,7 @@ export const taskProgressionService = {
     // Compute approved tasks count per level
     const approvedTasksByLevelId = new Map<string, Set<string>>();
     for (const p of userTaskProgressList) {
-      if ((!p.status || p.status === 'APPROVED') && p.task?.levelId && p.task?.id) {
+      if (p.status === 'APPROVED' && p.task?.levelId && p.task?.id) {
         if (!approvedTasksByLevelId.has(p.task.levelId)) {
           approvedTasksByLevelId.set(p.task.levelId, new Set());
         }
@@ -104,7 +104,7 @@ export const taskProgressionService = {
       }
     }
     for (const s of userSubmissionsList) {
-      if ((!s.status || s.status === 'APPROVED') && s.task?.levelId && s.task?.id) {
+      if (s.status === 'APPROVED' && s.task?.levelId && s.task?.id) {
         if (!approvedTasksByLevelId.has(s.task.levelId)) {
           approvedTasksByLevelId.set(s.task.levelId, new Set());
         }
