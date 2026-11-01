@@ -22,6 +22,7 @@ import telegramRoutes from './routes/telegramRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config';
 import { prisma } from './prisma';
+import { ensureUserWithdrawalColumns } from './utils/ensureSchema';
 import { getAdminSpaHtml } from './views/adminHtml';
 
 export function createApp() {
@@ -147,6 +148,14 @@ export function createApp() {
       }
     }
 
+    next();
+  });
+
+  // Ensure database schema columns exist in PostgreSQL on cold start
+  app.use(async (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      await ensureUserWithdrawalColumns(prisma);
+    }
     next();
   });
 

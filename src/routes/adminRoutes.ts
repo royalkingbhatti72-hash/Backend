@@ -25,6 +25,7 @@ import {
   getAllTelegramUsers,
   grantMoreCodesToTelegramUser,
 } from '../services/telegramService';
+import { ensureUserWithdrawalColumns } from '../utils/ensureSchema';
 
 const router = Router();
 
@@ -293,24 +294,52 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       ];
     }
 
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        include: {
-          wallet: true,
-          _count: {
-            select: {
-              taskProgress: { where: { status: 'APPROVED' } },
-              referrals: true,
+    let users: any[];
+    let total: number;
+    try {
+      [users, total] = await Promise.all([
+        prisma.user.findMany({
+          where,
+          include: {
+            wallet: true,
+            _count: {
+              select: {
+                taskProgress: { where: { status: 'APPROVED' } },
+                referrals: true,
+              },
             },
           },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.user.count({ where }),
-    ]);
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.user.count({ where }),
+      ]);
+    } catch (err: any) {
+      if (String(err?.message).includes('isWithdrawalLocked') || String(err?.message).includes('column')) {
+        await ensureUserWithdrawalColumns(prisma);
+        [users, total] = await Promise.all([
+          prisma.user.findMany({
+            where,
+            include: {
+              wallet: true,
+              _count: {
+                select: {
+                  taskProgress: { where: { status: 'APPROVED' } },
+                  referrals: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit,
+          }),
+          prisma.user.count({ where }),
+        ]);
+      } else {
+        throw err;
+      }
+    }
 
     const formattedUsers = users.map((u) => ({
       id: u.id,
@@ -345,24 +374,51 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
 router.get('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        wallet: true,
-        referredBy: { select: { id: true, name: true, phone: true } },
-        levelProgress: { include: { level: true } },
-        taskProgress: {
-          include: { task: { include: { level: true } } },
-          orderBy: { createdAt: 'desc' },
+    let user: any;
+    try {
+      user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          wallet: true,
+          referredBy: { select: { id: true, name: true, phone: true } },
+          levelProgress: { include: { level: true } },
+          taskProgress: {
+            include: { task: { include: { level: true } } },
+            orderBy: { createdAt: 'desc' },
+          },
+          depositRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+          withdrawalRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+          transactions: { orderBy: { createdAt: 'desc' }, take: 50 },
+          spinEntitlements: { include: { assignedPrize: true } },
+          spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 50 },
+          submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 20 },
         },
-        depositRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
-        withdrawalRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
-        transactions: { orderBy: { createdAt: 'desc' }, take: 50 },
-        spinEntitlements: { include: { assignedPrize: true } },
-        spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 50 },
-        submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 20 },
-      },
-    });
+      });
+    } catch (err: any) {
+      if (String(err?.message).includes('isWithdrawalLocked') || String(err?.message).includes('column')) {
+        await ensureUserWithdrawalColumns(prisma);
+        user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: {
+            wallet: true,
+            referredBy: { select: { id: true, name: true, phone: true } },
+            levelProgress: { include: { level: true } },
+            taskProgress: {
+              include: { task: { include: { level: true } } },
+              orderBy: { createdAt: 'desc' },
+            },
+            depositRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+            withdrawalRequests: { orderBy: { createdAt: 'desc' }, take: 50 },
+            transactions: { orderBy: { createdAt: 'desc' }, take: 50 },
+            spinEntitlements: { include: { assignedPrize: true } },
+            spinHistories: { include: { prize: true }, orderBy: { createdAt: 'desc' }, take: 50 },
+            submissions: { include: { task: true }, orderBy: { createdAt: 'desc' }, take: 20 },
+          },
+        });
+      } else {
+        throw err;
+      }
+    }
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

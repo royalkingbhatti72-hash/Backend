@@ -76404,6 +76404,31 @@ async function setLevelWithdrawalNotice(levelNumber, notice) {
   });
 }
 
+// src/utils/ensureSchema.ts
+var schemaEnsured = false;
+var schemaPromise = null;
+async function ensureUserWithdrawalColumns(prisma2) {
+  if (schemaEnsured) return;
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      try {
+        await prisma2.$executeRawUnsafe(`
+          ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isWithdrawalLocked" BOOLEAN NOT NULL DEFAULT false;
+        `);
+        await prisma2.$executeRawUnsafe(`
+          ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "withdrawalLockReason" TEXT;
+        `);
+        schemaEnsured = true;
+      } catch (err) {
+        console.warn("[Auto-Migration] Notice ensuring User withdrawal columns:", err);
+      } finally {
+        schemaPromise = null;
+      }
+    })();
+  }
+  await schemaPromise;
+}
+
 // src/services/withdrawalEligibilityService.ts
 async function getWithdrawalEligibility(userId) {
   const [wallet, user, levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] = await Promise.all([
@@ -76414,6 +76439,15 @@ async function getWithdrawalEligibility(userId) {
     prisma.user.findUnique({
       where: { id: userId },
       select: { isWithdrawalLocked: true, withdrawalLockReason: true }
+    }).catch(async (err) => {
+      if (String(err?.message).includes("isWithdrawalLocked") || String(err?.message).includes("column")) {
+        await ensureUserWithdrawalColumns(prisma);
+        return prisma.user.findUnique({
+          where: { id: userId },
+          select: { isWithdrawalLocked: true, withdrawalLockReason: true }
+        }).catch(() => null);
+      }
+      return null;
     }),
     prisma.level.findMany({
       select: { id: true, levelNumber: true, requiredTaskCount: true },
@@ -77621,24 +77655,52 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
         { id: { contains: search } }
       ];
     }
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        include: {
-          wallet: true,
-          _count: {
-            select: {
-              taskProgress: { where: { status: "APPROVED" } },
-              referrals: true
+    let users;
+    let total;
+    try {
+      [users, total] = await Promise.all([
+        prisma.user.findMany({
+          where,
+          include: {
+            wallet: true,
+            _count: {
+              select: {
+                taskProgress: { where: { status: "APPROVED" } },
+                referrals: true
+              }
             }
-          }
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit
-      }),
-      prisma.user.count({ where })
-    ]);
+          },
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit
+        }),
+        prisma.user.count({ where })
+      ]);
+    } catch (err) {
+      if (String(err?.message).includes("isWithdrawalLocked") || String(err?.message).includes("column")) {
+        await ensureUserWithdrawalColumns(prisma);
+        [users, total] = await Promise.all([
+          prisma.user.findMany({
+            where,
+            include: {
+              wallet: true,
+              _count: {
+                select: {
+                  taskProgress: { where: { status: "APPROVED" } },
+                  referrals: true
+                }
+              }
+            },
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: limit
+          }),
+          prisma.user.count({ where })
+        ]);
+      } else {
+        throw err;
+      }
+    }
     const formattedUsers = users.map((u) => ({
       id: u.id,
       name: u.name,
@@ -77670,24 +77732,51 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
 router11.get("/users/:userId", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.userId;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        wallet: true,
-        referredBy: { select: { id: true, name: true, phone: true } },
-        levelProgress: { include: { level: true } },
-        taskProgress: {
-          include: { task: { include: { level: true } } },
-          orderBy: { createdAt: "desc" }
-        },
-        depositRequests: { orderBy: { createdAt: "desc" }, take: 50 },
-        withdrawalRequests: { orderBy: { createdAt: "desc" }, take: 50 },
-        transactions: { orderBy: { createdAt: "desc" }, take: 50 },
-        spinEntitlements: { include: { assignedPrize: true } },
-        spinHistories: { include: { prize: true }, orderBy: { createdAt: "desc" }, take: 50 },
-        submissions: { include: { task: true }, orderBy: { createdAt: "desc" }, take: 20 }
+    let user;
+    try {
+      user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          wallet: true,
+          referredBy: { select: { id: true, name: true, phone: true } },
+          levelProgress: { include: { level: true } },
+          taskProgress: {
+            include: { task: { include: { level: true } } },
+            orderBy: { createdAt: "desc" }
+          },
+          depositRequests: { orderBy: { createdAt: "desc" }, take: 50 },
+          withdrawalRequests: { orderBy: { createdAt: "desc" }, take: 50 },
+          transactions: { orderBy: { createdAt: "desc" }, take: 50 },
+          spinEntitlements: { include: { assignedPrize: true } },
+          spinHistories: { include: { prize: true }, orderBy: { createdAt: "desc" }, take: 50 },
+          submissions: { include: { task: true }, orderBy: { createdAt: "desc" }, take: 20 }
+        }
+      });
+    } catch (err) {
+      if (String(err?.message).includes("isWithdrawalLocked") || String(err?.message).includes("column")) {
+        await ensureUserWithdrawalColumns(prisma);
+        user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: {
+            wallet: true,
+            referredBy: { select: { id: true, name: true, phone: true } },
+            levelProgress: { include: { level: true } },
+            taskProgress: {
+              include: { task: { include: { level: true } } },
+              orderBy: { createdAt: "desc" }
+            },
+            depositRequests: { orderBy: { createdAt: "desc" }, take: 50 },
+            withdrawalRequests: { orderBy: { createdAt: "desc" }, take: 50 },
+            transactions: { orderBy: { createdAt: "desc" }, take: 50 },
+            spinEntitlements: { include: { assignedPrize: true } },
+            spinHistories: { include: { prize: true }, orderBy: { createdAt: "desc" }, take: 50 },
+            submissions: { include: { task: true }, orderBy: { createdAt: "desc" }, take: 20 }
+          }
+        });
+      } else {
+        throw err;
       }
-    });
+    }
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -79670,6 +79759,12 @@ function createApp() {
           message: status.message
         });
       }
+    }
+    next();
+  });
+  app2.use(async (req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+      await ensureUserWithdrawalColumns(prisma);
     }
     next();
   });

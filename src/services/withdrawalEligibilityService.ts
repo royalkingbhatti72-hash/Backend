@@ -1,5 +1,6 @@
 import { prisma } from '../prisma';
 import { getAllLevelWithdrawalNotices } from './levelNoticeService';
+import { ensureUserWithdrawalColumns } from '../utils/ensureSchema';
 
 export interface WithdrawalEligibility {
   isLocked: boolean;
@@ -37,6 +38,15 @@ export async function getWithdrawalEligibility(userId: string): Promise<Withdraw
       prisma.user.findUnique({
         where: { id: userId },
         select: { isWithdrawalLocked: true, withdrawalLockReason: true },
+      }).catch(async (err) => {
+        if (String(err?.message).includes('isWithdrawalLocked') || String(err?.message).includes('column')) {
+          await ensureUserWithdrawalColumns(prisma);
+          return prisma.user.findUnique({
+            where: { id: userId },
+            select: { isWithdrawalLocked: true, withdrawalLockReason: true },
+          }).catch(() => null);
+        }
+        return null;
       }),
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },

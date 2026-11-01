@@ -19,6 +19,8 @@ CREATE TABLE "User" (
     "referralCode" TEXT NOT NULL,
     "referredById" TEXT,
     "accountStatus" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "isWithdrawalLocked" BOOLEAN NOT NULL DEFAULT false,
+    "withdrawalLockReason" TEXT,
     "mustChangePassword" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
