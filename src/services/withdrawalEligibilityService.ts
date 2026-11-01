@@ -35,7 +35,7 @@ export async function getWithdrawalEligibility(userId: string): Promise<Withdraw
         select: { availableBalance: true },
       }),
       prisma.user.findUnique({
-        where: { userId },
+        where: { id: userId },
         select: { isWithdrawalLocked: true, withdrawalLockReason: true },
       }),
       prisma.level.findMany({
