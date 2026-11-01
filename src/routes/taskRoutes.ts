@@ -127,7 +127,13 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
       };
     });
 
-    res.json({ levels: levelsWithProgress });
+    const isLevel4Reached = Boolean(
+      level3Completed ||
+      (levelStats.get(4)?.approvedCount || 0) > 0 ||
+      level4Completed
+    );
+
+    res.json({ levels: levelsWithProgress, isLevel4Reached });
   } catch (err) {
     next(err);
   }

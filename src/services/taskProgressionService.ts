@@ -29,7 +29,7 @@ export const taskProgressionService = {
   /**
    * Evaluates sequential task progression for a user in a specific level
    */
-  async getLevelTasksForUser(userId: string, levelNumber: number): Promise<{ level: any; tasks: EvaluatedTask[]; isLevelUnlocked: boolean }> {
+  async getLevelTasksForUser(userId: string, levelNumber: number): Promise<{ level: any; tasks: EvaluatedTask[]; isLevelUnlocked: boolean; isLevel4Reached?: boolean }> {
     const level = await prisma.level.findUnique({
       where: { levelNumber },
       include: {
@@ -135,6 +135,16 @@ export const taskProgressionService = {
     const l4Completed = l3Completed && (levelStatsByNumber.get(4)?.isCompleted || false);
     const isLevel4Unlocked = l3Completed;
 
+    const isLevel4Reached = Boolean(
+      l3Completed ||
+      (levelStatsByNumber.get(4)?.approvedCount || 0) > 0 ||
+      l4Completed ||
+      userLevelProgressList.some((lp) => {
+        const lvl = allLevels.find((l) => l.id === lp.levelId);
+        return lvl && lvl.levelNumber >= 4;
+      })
+    );
+
     const hasWithdrawnLevel1 = userWithdrawalsList.length > 0;
 
     // Check if current level is unlocked
@@ -206,9 +216,10 @@ export const taskProgressionService = {
     }
 
     // If level itself is locked:
-    // - For Levels 1 to 3 (or before Level 4 is reached): hide task details, prizes, and prices until unlocked!
+    // When a user has reached Level 4 (or for levels 4 to 10), show task details, prizes, and descriptions!
+    // Only mask details for Levels 1 to 3 if not yet reached.
     if (!isLevelUnlocked) {
-      const hideDetails = levelNumber <= 3 || !isLevel4Unlocked;
+      const hideDetails = levelNumber <= 3 ? !isLevelUnlocked : !isLevel4Reached;
       const lockedTasks: EvaluatedTask[] = level.tasks.map((task) => {
         const isPrepaidTask = Boolean(
           task.isPaid ||
@@ -237,10 +248,10 @@ export const taskProgressionService = {
           lockMessage:
             level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1
               ? 'Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks.'
-              : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
-          instructions: null,
+              : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first to submit this task.`,
+          instructions: hideDetails ? null : task.instructions,
           protectedUrl: null,
-          submissionInstructions: null,
+          submissionInstructions: hideDetails ? null : task.submissionInstructions,
           externalContact: null,
           submission: null,
         };
@@ -250,6 +261,7 @@ export const taskProgressionService = {
         level,
         tasks: lockedTasks,
         isLevelUnlocked: false,
+        isLevel4Reached,
       };
     }
 
@@ -446,6 +458,7 @@ export const taskProgressionService = {
       level,
       tasks: evaluatedTasks,
       isLevelUnlocked,
+      isLevel4Reached,
     };
   },
 

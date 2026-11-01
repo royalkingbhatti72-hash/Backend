@@ -66101,6 +66101,12 @@ var taskProgressionService = {
     const l3Completed = l2Completed && (levelStatsByNumber.get(3)?.isCompleted || false);
     const l4Completed = l3Completed && (levelStatsByNumber.get(4)?.isCompleted || false);
     const isLevel4Unlocked = l3Completed;
+    const isLevel4Reached = Boolean(
+      l3Completed || (levelStatsByNumber.get(4)?.approvedCount || 0) > 0 || l4Completed || userLevelProgressList.some((lp) => {
+        const lvl = allLevels.find((l) => l.id === lp.levelId);
+        return lvl && lvl.levelNumber >= 4;
+      })
+    );
     const hasWithdrawnLevel1 = userWithdrawalsList.length > 0;
     let isLevelUnlocked = false;
     if (levelNumber === 1) {
@@ -66162,7 +66168,7 @@ var taskProgressionService = {
       }
     }
     if (!isLevelUnlocked) {
-      const hideDetails = levelNumber <= 3 || !isLevel4Unlocked;
+      const hideDetails = levelNumber <= 3 ? !isLevelUnlocked : !isLevel4Reached;
       const lockedTasks = level.tasks.map((task) => {
         const isPrepaidTask = Boolean(
           task.isPaid || task.unlockFee && task.unlockFee > 0 || task.taskType?.toLowerCase().includes("prepaid")
@@ -66182,10 +66188,10 @@ var taskProgressionService = {
           status: task.status,
           userStatus: "LOCKED",
           isPaidUnlocked: false,
-          lockMessage: level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1 ? "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks." : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first.`,
-          instructions: null,
+          lockMessage: level.levelNumber === 2 && l1Completed && !hasWithdrawnLevel1 ? "Level 2 is locked. You must withdraw your total account balance from Level 1 before you can start Level 2 tasks." : `Level ${level.levelNumber} is locked. Complete all tasks in Level ${level.levelNumber - 1} first to submit this task.`,
+          instructions: hideDetails ? null : task.instructions,
           protectedUrl: null,
-          submissionInstructions: null,
+          submissionInstructions: hideDetails ? null : task.submissionInstructions,
           externalContact: null,
           submission: null
         };
@@ -66193,7 +66199,8 @@ var taskProgressionService = {
       return {
         level,
         tasks: lockedTasks,
-        isLevelUnlocked: false
+        isLevelUnlocked: false,
+        isLevel4Reached
       };
     }
     const progressMap = new Map(currentLevelProgressRecords.map((p) => [p.taskId, p]));
@@ -66344,7 +66351,8 @@ var taskProgressionService = {
     return {
       level,
       tasks: evaluatedTasks,
-      isLevelUnlocked
+      isLevelUnlocked,
+      isLevel4Reached
     };
   },
   /**
@@ -75842,7 +75850,10 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
         lockReason
       };
     });
-    res.json({ levels: levelsWithProgress });
+    const isLevel4Reached = Boolean(
+      level3Completed || (levelStats.get(4)?.approvedCount || 0) > 0 || level4Completed
+    );
+    res.json({ levels: levelsWithProgress, isLevel4Reached });
   } catch (err) {
     next(err);
   }
