@@ -50,6 +50,8 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response, next) => {
         isUnrestricted: eligibility.isUnrestricted,
         hasWithdrawnLevel1: eligibility.hasWithdrawnLevel1,
         hasWithdrawnLevel2: eligibility.hasWithdrawnLevel2,
+        isAdminLocked: eligibility.isAdminLocked,
+        adminLockReason: eligibility.adminLockReason,
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,

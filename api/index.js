@@ -76406,12 +76406,15 @@ async function setLevelWithdrawalNotice(levelNumber, notice) {
 
 // src/services/withdrawalEligibilityService.ts
 async function getWithdrawalEligibility(userId) {
-  const wallet = await prisma.wallet.findUnique({
-    where: { userId },
-    select: { availableBalance: true }
-  });
-  const availableBalance = wallet?.availableBalance || 0;
-  const [levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] = await Promise.all([
+  const [wallet, user, levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] = await Promise.all([
+    prisma.wallet.findUnique({
+      where: { userId },
+      select: { availableBalance: true }
+    }),
+    prisma.user.findUnique({
+      where: { userId },
+      select: { isWithdrawalLocked: true, withdrawalLockReason: true }
+    }),
     prisma.level.findMany({
       select: { id: true, levelNumber: true, requiredTaskCount: true },
       orderBy: { levelNumber: "asc" }
@@ -76434,6 +76437,26 @@ async function getWithdrawalEligibility(userId) {
     }),
     getAllLevelWithdrawalNotices()
   ]);
+  const availableBalance = wallet?.availableBalance || 0;
+  if (user?.isWithdrawalLocked) {
+    const lockNotice = user.withdrawalLockReason?.trim() || "Your withdrawal access has been temporarily locked by administration.";
+    return {
+      isLocked: true,
+      lockReason: "ADMIN_LOCKED",
+      stage: "ADMIN_LOCKED",
+      eligiblePercent: 0,
+      maxWithdrawableAmount: 0,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: lockNotice,
+      hasWithdrawnLevel1: false,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount: 0,
+      currentLevelNumber: 1,
+      isAdminLocked: true,
+      adminLockReason: lockNotice
+    };
+  }
   const approvedTasksByLevel = /* @__PURE__ */ new Map();
   for (const p of userTaskProgress) {
     if (p.task?.levelId && p.task?.id) {
@@ -76606,6 +76629,8 @@ router6.get("/", requireAuth, async (req, res, next) => {
         isUnrestricted: eligibility.isUnrestricted,
         hasWithdrawnLevel1: eligibility.hasWithdrawnLevel1,
         hasWithdrawnLevel2: eligibility.hasWithdrawnLevel2,
+        isAdminLocked: eligibility.isAdminLocked,
+        adminLockReason: eligibility.adminLockReason,
         allLevelNotices: levels.map((l) => ({
           levelNumber: l.levelNumber,
           title: l.title,
@@ -77621,6 +77646,8 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
       referralCode: u.referralCode,
       referredById: u.referredById,
       accountStatus: u.accountStatus,
+      isWithdrawalLocked: u.isWithdrawalLocked,
+      withdrawalLockReason: u.withdrawalLockReason,
       createdAt: u.createdAt,
       walletBalance: u.wallet?.availableBalance || 0,
       creditPoints: u.wallet?.creditPoints ?? 100,
@@ -77687,6 +77714,8 @@ router11.put("/users/:userId/status", requireAdmin, async (req, res, next) => {
         phone: true,
         referralCode: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         updatedAt: true
       }
     });
@@ -77707,6 +77736,65 @@ router11.put("/users/:userId/status", requireAdmin, async (req, res, next) => {
     next(err);
   }
 });
+router11.put("/users/:userId/withdrawal-lock", requireAdmin, async (req, res, next) => {
+  try {
+    const userId = req.params.userId;
+    const { isLocked, reason } = external_exports.object({
+      isLocked: external_exports.boolean(),
+      reason: external_exports.string().optional()
+    }).parse(req.body);
+    if (isLocked && (!reason || !reason.trim())) {
+      return res.status(400).json({ error: "Admin must provide a reason when locking withdrawals for a user." });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const trimmedReason = isLocked ? reason.trim() : null;
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isWithdrawalLocked: isLocked,
+        withdrawalLockReason: trimmedReason
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
+        updatedAt: true
+      }
+    });
+    await logAdminAction({
+      adminId: req.admin.id,
+      adminUsername: req.admin.username,
+      action: isLocked ? "USER_WITHDRAWAL_LOCKED" : "USER_WITHDRAWAL_UNLOCKED",
+      entityType: "User",
+      entityId: user.id,
+      previousState: {
+        isWithdrawalLocked: user.isWithdrawalLocked,
+        withdrawalLockReason: user.withdrawalLockReason
+      },
+      newState: {
+        isWithdrawalLocked: isLocked,
+        withdrawalLockReason: trimmedReason
+      },
+      reason: isLocked ? trimmedReason : "Withdrawals unlocked by administrator",
+      ipAddress: req.ip
+    });
+    sendUserLiveCommand(userId, "wallet", {
+      isWithdrawalLocked: isLocked,
+      withdrawalLockReason: trimmedReason
+    });
+    res.json({
+      message: isLocked ? `Withdrawal locked for ${updated.name}. Reason: ${trimmedReason}` : `Withdrawal unlocked for ${updated.name}.`,
+      user: updated
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.userId;
@@ -77714,6 +77802,8 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
       name: external_exports.string().trim().min(2, "Name must be at least 2 characters").optional(),
       phone: external_exports.string().trim().min(5, "Phone must be at least 5 characters").optional(),
       accountStatus: external_exports.enum(["ACTIVE", "SUSPENDED"]).optional(),
+      isWithdrawalLocked: external_exports.boolean().optional(),
+      withdrawalLockReason: external_exports.string().nullable().optional(),
       reason: external_exports.string().optional()
     });
     const parsed = schema.parse(req.body);
@@ -77723,7 +77813,7 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
     }
     const existingUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true }
+      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true, isWithdrawalLocked: true, withdrawalLockReason: true }
     });
     if (!existingUser) {
       return res.status(404).json({ error: "User not found" });
@@ -77753,6 +77843,8 @@ router11.patch("/users/:userId", requireAdmin, async (req, res, next) => {
         phone: true,
         referralCode: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         updatedAt: true
       }
     });
@@ -77788,6 +77880,8 @@ router11.get("/users/:userId/summary", requireAdmin, async (req, res, next) => {
         referralCode: true,
         referredById: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         createdAt: true,
         wallet: {
           select: {
@@ -77814,6 +77908,8 @@ router11.get("/users/:userId/summary", requireAdmin, async (req, res, next) => {
         referralCode: u.referralCode,
         referredById: u.referredById,
         accountStatus: u.accountStatus,
+        isWithdrawalLocked: u.isWithdrawalLocked,
+        withdrawalLockReason: u.withdrawalLockReason,
         createdAt: u.createdAt,
         walletBalance: u.wallet?.availableBalance || 0,
         creditPoints: u.wallet?.creditPoints ?? 100,

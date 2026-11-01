@@ -3,8 +3,8 @@ import { getAllLevelWithdrawalNotices } from './levelNoticeService';
 
 export interface WithdrawalEligibility {
   isLocked: boolean;
-  lockReason: 'LEVEL_1_NOT_COMPLETED' | 'LEVEL_2_NOT_COMPLETED' | 'LEVEL_3_NOT_COMPLETED' | null;
-  stage: 'LOCKED_BEFORE_L1' | 'LEVEL_1' | 'LOCKED_BEFORE_L2' | 'LEVEL_2' | 'LOCKED_BEFORE_L3' | 'UNRESTRICTED';
+  lockReason: 'LEVEL_1_NOT_COMPLETED' | 'LEVEL_2_NOT_COMPLETED' | 'LEVEL_3_NOT_COMPLETED' | 'ADMIN_LOCKED' | null;
+  stage: 'LOCKED_BEFORE_L1' | 'LEVEL_1' | 'LOCKED_BEFORE_L2' | 'LEVEL_2' | 'LOCKED_BEFORE_L3' | 'UNRESTRICTED' | 'ADMIN_LOCKED';
   eligiblePercent: number; // 0 or 100
   maxWithdrawableAmount: number;
   availableBalance: number;
@@ -14,10 +14,13 @@ export interface WithdrawalEligibility {
   hasWithdrawnLevel2: boolean;
   completedLevelsCount: number;
   currentLevelNumber: number;
+  isAdminLocked?: boolean;
+  adminLockReason?: string | null;
 }
 
 /**
  * Calculates current withdrawal eligibility and stage for a specific user:
+ * - Admin lock active: Withdrawal is immediately LOCKED with the admin's reason.
  * - Before Level 1 completed: Withdrawal is LOCKED.
  * - Level 1 completed: User can withdraw full balance (100%). Level 2 tasks are locked until Level 1 balance is withdrawn.
  * - After Level 1 balance withdrawn: Withdrawal is LOCKED until Level 2 completion.
@@ -25,14 +28,16 @@ export interface WithdrawalEligibility {
  * - Level 3 completed: User can withdraw any amount at any time (even 100% or any %) with zero restrictions.
  */
 export async function getWithdrawalEligibility(userId: string): Promise<WithdrawalEligibility> {
-  const wallet = await prisma.wallet.findUnique({
-    where: { userId },
-    select: { availableBalance: true },
-  });
-  const availableBalance = wallet?.availableBalance || 0;
-
-  const [levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] =
+  const [wallet, user, levels, userTaskProgress, userLevelProgress, userSubmissions, withdrawals, notices] =
     await Promise.all([
+      prisma.wallet.findUnique({
+        where: { userId },
+        select: { availableBalance: true },
+      }),
+      prisma.user.findUnique({
+        where: { userId },
+        select: { isWithdrawalLocked: true, withdrawalLockReason: true },
+      }),
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },
         orderBy: { levelNumber: 'asc' },
@@ -55,6 +60,29 @@ export async function getWithdrawalEligibility(userId: string): Promise<Withdraw
       }),
       getAllLevelWithdrawalNotices(),
     ]);
+
+  const availableBalance = wallet?.availableBalance || 0;
+
+  // Check admin manual lock first
+  if (user?.isWithdrawalLocked) {
+    const lockNotice = user.withdrawalLockReason?.trim() || 'Your withdrawal access has been temporarily locked by administration.';
+    return {
+      isLocked: true,
+      lockReason: 'ADMIN_LOCKED',
+      stage: 'ADMIN_LOCKED',
+      eligiblePercent: 0,
+      maxWithdrawableAmount: 0,
+      availableBalance,
+      isUnrestricted: false,
+      withdrawalNotice: lockNotice,
+      hasWithdrawnLevel1: false,
+      hasWithdrawnLevel2: false,
+      completedLevelsCount: 0,
+      currentLevelNumber: 1,
+      isAdminLocked: true,
+      adminLockReason: lockNotice,
+    };
+  }
 
   const approvedTasksByLevel = new Map<string, Set<string>>();
   for (const p of userTaskProgress) {

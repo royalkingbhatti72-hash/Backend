@@ -319,6 +319,8 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       referralCode: u.referralCode,
       referredById: u.referredById,
       accountStatus: u.accountStatus,
+      isWithdrawalLocked: u.isWithdrawalLocked,
+      withdrawalLockReason: u.withdrawalLockReason,
       createdAt: u.createdAt,
       walletBalance: u.wallet?.availableBalance || 0,
       creditPoints: u.wallet?.creditPoints ?? 100,
@@ -392,6 +394,8 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
         phone: true,
         referralCode: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         updatedAt: true,
       },
     });
@@ -417,6 +421,76 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
   }
 });
 
+router.put('/users/:userId/withdrawal-lock', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const userId = req.params.userId as string;
+    const { isLocked, reason } = z.object({
+      isLocked: z.boolean(),
+      reason: z.string().optional(),
+    }).parse(req.body);
+
+    if (isLocked && (!reason || !reason.trim())) {
+      return res.status(400).json({ error: 'Admin must provide a reason when locking withdrawals for a user.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const trimmedReason = isLocked ? reason!.trim() : null;
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isWithdrawalLocked: isLocked,
+        withdrawalLockReason: trimmedReason,
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        referralCode: true,
+        accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: isLocked ? 'USER_WITHDRAWAL_LOCKED' : 'USER_WITHDRAWAL_UNLOCKED',
+      entityType: 'User',
+      entityId: user.id,
+      previousState: {
+        isWithdrawalLocked: user.isWithdrawalLocked,
+        withdrawalLockReason: user.withdrawalLockReason,
+      },
+      newState: {
+        isWithdrawalLocked: isLocked,
+        withdrawalLockReason: trimmedReason,
+      },
+      reason: isLocked ? trimmedReason! : 'Withdrawals unlocked by administrator',
+      ipAddress: req.ip,
+    });
+
+    // Notify user's active session without page reload
+    sendUserLiveCommand(userId, 'wallet', {
+      isWithdrawalLocked: isLocked,
+      withdrawalLockReason: trimmedReason,
+    });
+
+    res.json({
+      message: isLocked
+        ? `Withdrawal locked for ${updated.name}. Reason: ${trimmedReason}`
+        : `Withdrawal unlocked for ${updated.name}.`,
+      user: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Update specific fields of a single user (only modified fields are sent and updated)
 router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
@@ -425,6 +499,8 @@ router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: 
       name: z.string().trim().min(2, 'Name must be at least 2 characters').optional(),
       phone: z.string().trim().min(5, 'Phone must be at least 5 characters').optional(),
       accountStatus: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
+      isWithdrawalLocked: z.boolean().optional(),
+      withdrawalLockReason: z.string().nullable().optional(),
       reason: z.string().optional(),
     });
     const parsed = schema.parse(req.body);
@@ -436,7 +512,7 @@ router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: 
 
     const existingUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true },
+      select: { id: true, name: true, phone: true, accountStatus: true, referralCode: true, isWithdrawalLocked: true, withdrawalLockReason: true },
     });
     if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -471,6 +547,8 @@ router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: 
         phone: true,
         referralCode: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         updatedAt: true,
       },
     });
@@ -512,6 +590,8 @@ router.get('/users/:userId/summary', requireAdmin, async (req: AdminAuthRequest,
         referralCode: true,
         referredById: true,
         accountStatus: true,
+        isWithdrawalLocked: true,
+        withdrawalLockReason: true,
         createdAt: true,
         wallet: {
           select: {
@@ -540,6 +620,8 @@ router.get('/users/:userId/summary', requireAdmin, async (req: AdminAuthRequest,
         referralCode: u.referralCode,
         referredById: u.referredById,
         accountStatus: u.accountStatus,
+        isWithdrawalLocked: u.isWithdrawalLocked,
+        withdrawalLockReason: u.withdrawalLockReason,
         createdAt: u.createdAt,
         walletBalance: u.wallet?.availableBalance || 0,
         creditPoints: u.wallet?.creditPoints ?? 100,

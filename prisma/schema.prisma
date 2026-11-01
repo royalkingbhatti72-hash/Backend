@@ -18,6 +18,8 @@ model User {
   referredById        String?
   accountStatus       String   @default("ACTIVE") // ACTIVE, SUSPENDED
   mustChangePassword  Boolean  @default(false)
+  isWithdrawalLocked   Boolean  @default(false)
+  withdrawalLockReason String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
