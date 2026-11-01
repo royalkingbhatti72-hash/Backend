@@ -120,7 +120,6 @@ router.put('/read-all', requireAuth, async (req: AuthRequest, res: Response, nex
       where: {
         userId,
         isRead: false,
-        notificationType: { in: ['DEPOSIT_STATUS', 'WITHDRAWAL_STATUS', 'ANNOUNCEMENT'] },
       },
       data: { isRead: true },
     });
