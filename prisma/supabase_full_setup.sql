@@ -1528,8 +1528,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t1', "id", 1, 'Level 4 - Task 1 (Prepaid Rs 10,000)', 'Prepaid Task: Rs 10,000 unlock fee with guaranteed 40% commission reward (Rs 4,000).', 'Prepaid VIP Task #1',
-  4000, 0, true, 10000, 'https://youtu.be/ew__gmVo3Nk?si=cFdkl1FDuMSy2749',
+  'task_l4_t1', "id", 1, 'Level 4 - Task 1 (Prepaid Rs 30,000)', 'Prepaid Task: Rs 30,000 unlock fee with guaranteed 40% commission reward (Rs 12,000).', 'Prepaid VIP Task #1',
+  12000, 0, true, 30000, 'https://youtu.be/ew__gmVo3Nk?si=cFdkl1FDuMSy2749',
   '1. Click the official link below: https://youtu.be/ew__gmVo3Nk?si=cFdkl1FDuMSy2749
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1557,8 +1557,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t2', "id", 2, 'Level 4 - Task 2 (Prepaid Rs 20,000)', 'Prepaid Task: Rs 20,000 unlock fee with guaranteed 40% commission reward (Rs 8,000).', 'Prepaid VIP Task #2',
-  8000, 0, true, 20000, 'https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ',
+  'task_l4_t2', "id", 2, 'Level 4 - Task 2 (Prepaid Rs 40,000)', 'Prepaid Task: Rs 40,000 unlock fee with guaranteed 40% commission reward (Rs 16,000).', 'Prepaid VIP Task #2',
+  16000, 0, true, 40000, 'https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ',
   '1. Click the official link below: https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1586,8 +1586,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t3', "id", 3, 'Level 4 - Task 3 (Prepaid Rs 30,000)', 'Prepaid Task: Rs 30,000 unlock fee with guaranteed 40% commission reward (Rs 12,000).', 'Prepaid VIP Task #3',
-  12000, 0, true, 30000, 'https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk',
+  'task_l4_t3', "id", 3, 'Level 4 - Task 3 (Prepaid Rs 50,000)', 'Prepaid Task: Rs 50,000 unlock fee with guaranteed 40% commission reward (Rs 20,000).', 'Prepaid VIP Task #3',
+  20000, 0, true, 50000, 'https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk',
   '1. Click the official link below: https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1615,8 +1615,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t4', "id", 4, 'Level 4 - Task 4 (Prepaid Rs 40,000)', 'Prepaid Task: Rs 40,000 unlock fee with guaranteed 40% commission reward (Rs 16,000).', 'Prepaid VIP Task #4',
-  16000, 0, true, 40000, 'https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ',
+  'task_l4_t4', "id", 4, 'Level 4 - Task 4 (Prepaid Rs 60,000)', 'Prepaid Task: Rs 60,000 unlock fee with guaranteed 40% commission reward (Rs 24,000).', 'Prepaid VIP Task #4',
+  24000, 0, true, 60000, 'https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ',
   '1. Click the official link below: https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1644,8 +1644,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t5', "id", 5, 'Level 4 - Task 5 (Prepaid Rs 60,000)', 'Prepaid Task: Rs 60,000 unlock fee with guaranteed 40% commission reward (Rs 24,000).', 'Prepaid VIP Task #5',
-  24000, 0, true, 60000, 'https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe',
+  'task_l4_t5', "id", 5, 'Level 4 - Task 5 (Prepaid Rs 70,000)', 'Prepaid Task: Rs 70,000 unlock fee with guaranteed 40% commission reward (Rs 28,000).', 'Prepaid VIP Task #5',
+  28000, 0, true, 70000, 'https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe',
   '1. Click the official link below: https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1673,8 +1673,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t6', "id", 6, 'Level 4 - Task 6 (Prepaid Rs 80,000)', 'Prepaid Task: Rs 80,000 unlock fee with guaranteed 40% commission reward (Rs 32,000).', 'Prepaid VIP Task #6',
-  32000, 0, true, 80000, 'https://youtu.be/ZnmU_6BD0pY?si=XlE3zCfn8ufLolJ8',
+  'task_l4_t6', "id", 6, 'Level 4 - Task 6 (Prepaid Rs 90,000)', 'Prepaid Task: Rs 90,000 unlock fee with guaranteed 40% commission reward (Rs 36,000).', 'Prepaid VIP Task #6',
+  36000, 0, true, 90000, 'https://youtu.be/ZnmU_6BD0pY?si=XlE3zCfn8ufLolJ8',
   '1. Click the official link below: https://youtu.be/ZnmU_6BD0pY?si=XlE3zCfn8ufLolJ8
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1702,8 +1702,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t7', "id", 7, 'Level 4 - Task 7 (Prepaid Rs 100,000)', 'Prepaid Task: Rs 100,000 unlock fee with guaranteed 40% commission reward (Rs 40,000).', 'Prepaid VIP Task #7',
-  40000, 0, true, 100000, 'https://youtu.be/jCPcZUifbkc?si=W8SFeXKJEnh6h_BT',
+  'task_l4_t7', "id", 7, 'Level 4 - Task 7 (Prepaid Rs 110,000)', 'Prepaid Task: Rs 110,000 unlock fee with guaranteed 40% commission reward (Rs 44,000).', 'Prepaid VIP Task #7',
+  44000, 0, true, 110000, 'https://youtu.be/jCPcZUifbkc?si=W8SFeXKJEnh6h_BT',
   '1. Click the official link below: https://youtu.be/jCPcZUifbkc?si=W8SFeXKJEnh6h_BT
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1760,8 +1760,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t9', "id", 9, 'Level 4 - Task 9 (Prepaid Rs 160,000)', 'Prepaid Task: Rs 160,000 unlock fee with guaranteed 40% commission reward (Rs 64,000).', 'Prepaid VIP Task #9',
-  64000, 0, true, 160000, 'https://youtu.be/veNdcvpCNRM?si=LTwSsN-0YCpuY4he',
+  'task_l4_t9', "id", 9, 'Level 4 - Task 9 (Prepaid Rs 150,000)', 'Prepaid Task: Rs 150,000 unlock fee with guaranteed 40% commission reward (Rs 60,000).', 'Prepaid VIP Task #9',
+  60000, 0, true, 150000, 'https://youtu.be/veNdcvpCNRM?si=LTwSsN-0YCpuY4he',
   '1. Click the official link below: https://youtu.be/veNdcvpCNRM?si=LTwSsN-0YCpuY4he
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',
@@ -1789,8 +1789,8 @@ INSERT INTO "Task" (
   "requiresAdminApproval", "status", "createdAt", "updatedAt"
 )
 SELECT
-  'task_l4_t10', "id", 10, 'Level 4 - Task 10 (Prepaid Rs 200,000)', 'Prepaid Task: Rs 200,000 unlock fee with guaranteed 40% commission reward (Rs 80,000).', 'Prepaid VIP Task #10',
-  80000, 0, true, 200000, 'https://youtu.be/bA1j3q0Q5wo?si=IpB8KdfE9f7NA-_A',
+  'task_l4_t10', "id", 10, 'Level 4 - Task 10 (Prepaid Rs 170,000)', 'Prepaid Task: Rs 170,000 unlock fee with guaranteed 40% commission reward (Rs 68,000).', 'Prepaid VIP Task #10',
+  68000, 0, true, 170000, 'https://youtu.be/bA1j3q0Q5wo?si=IpB8KdfE9f7NA-_A',
   '1. Click the official link below: https://youtu.be/bA1j3q0Q5wo?si=IpB8KdfE9f7NA-_A
 2. Perform the required assignment.
 3. Submit transaction/reference proof for admin review.', 'Complete and receive approval for the previous task to unlock this task.',

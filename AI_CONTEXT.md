@@ -26,16 +26,16 @@ The workspace (`/Users/mmaazfalak/antigravity/Project55`) contains **two indepen
 - **Level 2**: Tasks 1–9 are free (`rewardAmount = 40`). **Task 10 is prepaid** costing **PKR 1,410** (`isPaid = true`, `unlockFee = 1410`) with a 40% commission of **PKR 564** (`rewardAmount = 564`). All 10 tasks must be `APPROVED` to unlock Level 3.
 - **Level 3**: Tasks 1–8 are free (`rewardAmount = 60`). **Task 9 is prepaid** costing **PKR 6,257** with a 40% commission of **PKR 2,503**. **Task 10 is prepaid** costing **PKR 14,260** with a 40% commission of **PKR 5,704**. All 10 tasks must be `APPROVED` to finish Level 3.
 - **Level 4 (VIP Prepaid Tier)**: 10 prepaid tasks (`isPaid = true`), each paying **40% commission**:
-  - Task 1: Fee `10,000` $\rightarrow$ Reward `4,000`
-  - Task 2: Fee `20,000` $\rightarrow$ Reward `8,000`
-  - Task 3: Fee `30,000` $\rightarrow$ Reward `12,000`
-  - Task 4: Fee `40,000` $\rightarrow$ Reward `16,000`
-  - Task 5: Fee `60,000` $\rightarrow$ Reward `24,000`
-  - Task 6: Fee `80,000` $\rightarrow$ Reward `32,000`
-  - Task 7: Fee `100,000` $\rightarrow$ Reward `40,000`
+  - Task 1: Fee `30,000` $\rightarrow$ Reward `12,000`
+  - Task 2: Fee `40,000` $\rightarrow$ Reward `16,000`
+  - Task 3: Fee `50,000` $\rightarrow$ Reward `20,000`
+  - Task 4: Fee `60,000` $\rightarrow$ Reward `24,000`
+  - Task 5: Fee `70,000` $\rightarrow$ Reward `28,000`
+  - Task 6: Fee `90,000` $\rightarrow$ Reward `36,000`
+  - Task 7: Fee `110,000` $\rightarrow$ Reward `44,000`
   - Task 8: Fee `130,000` $\rightarrow$ Reward `52,000`
-  - Task 9: Fee `160,000` $\rightarrow$ Reward `64,000`
-  - Task 10: Fee `200,000` $\rightarrow$ Reward `80,000`
+  - Task 9: Fee `150,000` $\rightarrow$ Reward `60,000`
+  - Task 10: Fee `170,000` $\rightarrow$ Reward `68,000`
   - **Unlocking Rule for Level 4**: All 10 tasks in Level 4 are `AVAILABLE` (selectable in any order) once Level 3 is completed. **Completing just 1 task out of 10 in Level 4 marks Level 4 as completed (`requiredTaskCount = 1`) and unlocks Level 5 task participation.**
 - **Levels 5–10**: 10 free tasks each (`isPaid = false`, `unlockFee = 0`, `rewardAmount = 0` / displayed as `TBD` until specified).
 - **Visibility & Sequential Rules**:

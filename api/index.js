@@ -74963,64 +74963,64 @@ var DATASET_10_LEVELS = [
         "task_id": 1,
         "type": "Prepaid VIP Task #1",
         "url": "https://youtu.be/ew__gmVo3Nk?si=cFdkl1FDuMSy2749",
-        "commission": 4e3,
-        "credit_points": 4e3,
-        "is_prepaid": true,
-        "prepaid_value": 1e4
-      },
-      {
-        "task_id": 2,
-        "type": "Prepaid VIP Task #2",
-        "url": "https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ",
-        "commission": 8e3,
-        "credit_points": 8e3,
-        "is_prepaid": true,
-        "prepaid_value": 2e4
-      },
-      {
-        "task_id": 3,
-        "type": "Prepaid VIP Task #3",
-        "url": "https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk",
         "commission": 12e3,
         "credit_points": 12e3,
         "is_prepaid": true,
         "prepaid_value": 3e4
       },
       {
-        "task_id": 4,
-        "type": "Prepaid VIP Task #4",
-        "url": "https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ",
+        "task_id": 2,
+        "type": "Prepaid VIP Task #2",
+        "url": "https://youtu.be/YCzRPKRAWmw?si=OKAr0OUB0T9XBzhJ",
         "commission": 16e3,
         "credit_points": 16e3,
         "is_prepaid": true,
         "prepaid_value": 4e4
       },
       {
-        "task_id": 5,
-        "type": "Prepaid VIP Task #5",
-        "url": "https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe",
+        "task_id": 3,
+        "type": "Prepaid VIP Task #3",
+        "url": "https://youtu.be/irHIeMEP5hw?si=Fh8SSfl0koXUrYrk",
+        "commission": 2e4,
+        "credit_points": 2e4,
+        "is_prepaid": true,
+        "prepaid_value": 5e4
+      },
+      {
+        "task_id": 4,
+        "type": "Prepaid VIP Task #4",
+        "url": "https://youtu.be/45GUatkxX3s?si=ZjsYNezm1YpflOOJ",
         "commission": 24e3,
         "credit_points": 24e3,
         "is_prepaid": true,
         "prepaid_value": 6e4
       },
       {
+        "task_id": 5,
+        "type": "Prepaid VIP Task #5",
+        "url": "https://youtu.be/_PB8D_W6CK8?si=LpdY4Z4-d5CwjcKe",
+        "commission": 28e3,
+        "credit_points": 28e3,
+        "is_prepaid": true,
+        "prepaid_value": 7e4
+      },
+      {
         "task_id": 6,
         "type": "Prepaid VIP Task #6",
         "url": "https://youtu.be/ZnmU_6BD0pY?si=XlE3zCfn8ufLolJ8",
-        "commission": 32e3,
-        "credit_points": 32e3,
+        "commission": 36e3,
+        "credit_points": 36e3,
         "is_prepaid": true,
-        "prepaid_value": 8e4
+        "prepaid_value": 9e4
       },
       {
         "task_id": 7,
         "type": "Prepaid VIP Task #7",
         "url": "https://youtu.be/jCPcZUifbkc?si=W8SFeXKJEnh6h_BT",
-        "commission": 4e4,
-        "credit_points": 4e4,
+        "commission": 44e3,
+        "credit_points": 44e3,
         "is_prepaid": true,
-        "prepaid_value": 1e5
+        "prepaid_value": 11e4
       },
       {
         "task_id": 8,
@@ -75035,19 +75035,19 @@ var DATASET_10_LEVELS = [
         "task_id": 9,
         "type": "Prepaid VIP Task #9",
         "url": "https://youtu.be/veNdcvpCNRM?si=LTwSsN-0YCpuY4he",
-        "commission": 64e3,
-        "credit_points": 64e3,
+        "commission": 6e4,
+        "credit_points": 6e4,
         "is_prepaid": true,
-        "prepaid_value": 16e4
+        "prepaid_value": 15e4
       },
       {
         "task_id": 10,
         "type": "Prepaid VIP Task #10",
         "url": "https://youtu.be/bA1j3q0Q5wo?si=IpB8KdfE9f7NA-_A",
-        "commission": 8e4,
-        "credit_points": 8e4,
+        "commission": 68e3,
+        "credit_points": 68e3,
         "is_prepaid": true,
-        "prepaid_value": 2e5
+        "prepaid_value": 17e4
       }
     ]
   },
