@@ -4,12 +4,17 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { prisma } from '../prisma';
 import { config } from '../config';
-import { requireAdmin, AdminAuthRequest } from '../middleware/adminAuth';
+import { requireAdmin, requireSuperAdmin, AdminAuthRequest } from '../middleware/adminAuth';
 import { logAdminAction } from '../services/auditService';
 import { taskProgressionService } from '../services/taskProgressionService';
 import { affiliateService } from '../services/affiliateService';
 import { sendUserLiveCommand } from '../utils/supabase';
 import { ensureOfficialSpinPrizes } from '../services/spinPrizeService';
+import {
+  getMiniAdminOtp,
+  verifyMiniAdminOtp,
+  generateOtpSecret,
+} from '../services/miniAdminOtpService';
 import {
   getAdminReferralCodesOverview,
   generateAdditionalCodes,
@@ -34,16 +39,23 @@ const router = Router();
 // ==========================================
 
 const adminLoginSchema = z.object({
-  username: z.string().min(1, 'Username is required'),
+  username: z.string().min(1, 'Username or Gmail is required'),
   password: z.string().min(1, 'Password is required'),
+  otp: z.string().optional(),
 });
 
 router.post('/login', async (req, res, next) => {
   try {
-    const { username, password } = adminLoginSchema.parse(req.body);
+    const { username, password, otp } = adminLoginSchema.parse(req.body);
+    const input = username.trim();
 
-    const admin = await prisma.adminUser.findUnique({
-      where: { username },
+    const admin = await prisma.adminUser.findFirst({
+      where: {
+        OR: [
+          { username: { equals: input, mode: 'insensitive' } },
+          { email: { equals: input, mode: 'insensitive' } },
+        ],
+      },
     });
 
     if (!admin || admin.status !== 'ACTIVE') {
@@ -53,6 +65,23 @@ router.post('/login', async (req, res, next) => {
     const isValid = await bcrypt.compare(password, admin.passwordHash);
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid administrator credentials' });
+    }
+
+    // Role-specific check: Mini Admins MUST provide a valid 10-minute dynamic OTP
+    if (admin.role === 'MINI_ADMIN') {
+      if (!otp || !otp.trim()) {
+        return res.status(400).json({
+          error: '10-minute dynamic OTP is required for Mini Admin login. Please obtain the current OTP from the Master Admin.',
+          requiresOtp: true,
+        });
+      }
+
+      if (!admin.otpSecret || !verifyMiniAdminOtp(admin.otpSecret, otp.trim())) {
+        return res.status(401).json({
+          error: 'Invalid or expired 10-minute OTP. Please check the current active OTP with Master Admin.',
+          requiresOtp: true,
+        });
+      }
     }
 
     const token = jwt.sign(
@@ -67,6 +96,7 @@ router.post('/login', async (req, res, next) => {
       action: 'ADMIN_LOGIN',
       entityType: 'AdminUser',
       entityId: admin.id,
+      details: { role: admin.role, email: admin.email },
       ipAddress: req.ip,
     });
 
@@ -76,6 +106,7 @@ router.post('/login', async (req, res, next) => {
       admin: {
         id: admin.id,
         username: admin.username,
+        email: admin.email,
         role: admin.role,
       },
     });
@@ -94,6 +125,29 @@ router.get('/me', requireAdmin, (req: AdminAuthRequest, res: Response) => {
 
 router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+
+    if (isMiniAdmin) {
+      const pendingTasks = await prisma.taskSubmission.count({
+        where: {
+          status: 'PENDING',
+          task: { level: { levelNumber: 1 } },
+        },
+      });
+
+      return res.json({
+        success: true,
+        counts: {
+          total: pendingTasks,
+          tasks: pendingTasks,
+          submissions: pendingTasks,
+          spins: 0,
+          deposits: 0,
+          withdrawals: 0,
+        },
+      });
+    }
+
     const [
       pendingTasks,
       pendingSpinsHistory,
@@ -140,6 +194,82 @@ router.get(['/notifications/counts', '/pending-counts'], requireAdmin, async (re
 
 router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+
+    if (isMiniAdmin) {
+      const [
+        totalUsers,
+        activeUsers,
+        totalTasks,
+        pendingSubmissions,
+        approvedLevel1Rewards,
+        recentActivity,
+      ] = await Promise.all([
+        prisma.user.count({
+          where: {
+            taskProgress: {
+              none: {
+                status: 'APPROVED',
+                task: { level: { levelNumber: { gt: 1 } } },
+              },
+            },
+          },
+        }),
+        prisma.user.count({
+          where: {
+            accountStatus: 'ACTIVE',
+            taskProgress: {
+              none: {
+                status: 'APPROVED',
+                task: { level: { levelNumber: { gt: 1 } } },
+              },
+            },
+          },
+        }),
+        prisma.task.count({ where: { level: { levelNumber: 1 } } }),
+        prisma.taskSubmission.count({
+          where: {
+            status: 'PENDING',
+            task: { level: { levelNumber: 1 } },
+          },
+        }),
+        prisma.taskSubmission.aggregate({
+          where: {
+            status: 'APPROVED',
+            task: { level: { levelNumber: 1 } },
+          },
+          _sum: { rewardAmount: true },
+        }),
+        prisma.adminAuditLog.findMany({
+          where: {
+            OR: [
+              { adminId: req.admin!.id },
+              { action: { in: ['TASK_SUBMISSION_APPROVE', 'TASK_SUBMISSION_REJECT'] } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+        }),
+      ]);
+
+      return res.json({
+        metrics: {
+          totalUsers,
+          activeUsers,
+          totalTasks,
+          pendingSubmissions,
+          pendingDeposits: 0,
+          pendingWithdrawals: 0,
+          totalDepositsAmount: 0,
+          totalPaidWithdrawalsAmount: 0,
+          totalApprovedRewardsAmount: approvedLevel1Rewards._sum.rewardAmount || 0,
+          totalReferrals: 0,
+        },
+        recentActivity,
+        recentTransactions: [],
+      });
+    }
+
     const [
       totalUsers,
       activeUsers,
@@ -214,7 +344,9 @@ router.get('/dashboard', requireAdmin, async (req: AdminAuthRequest, res: Respon
 
 router.get('/tasks/grid', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
     const levels = await prisma.level.findMany({
+      where: isMiniAdmin ? { levelNumber: 1 } : undefined,
       orderBy: { levelNumber: 'asc' },
       include: {
         tasks: {
@@ -275,6 +407,7 @@ router.get('/tasks/grid', requireAdmin, async (req: AdminAuthRequest, res: Respo
 
 router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
     const search = (req.query.search as string || '').trim();
     const status = (req.query.status as string || '').trim();
     const page = parseInt(req.query.page as string || '1', 10);
@@ -291,6 +424,29 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
         { phone: { contains: search } },
         { referralCode: { contains: search } },
         { id: { contains: search } },
+      ];
+    }
+
+    // Role-specific scope: Mini Admins can ONLY view Level 1 users
+    if (isMiniAdmin) {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          taskProgress: {
+            none: {
+              status: 'APPROVED',
+              task: { level: { levelNumber: { gt: 1 } } },
+            },
+          },
+        },
+        {
+          levelProgress: {
+            none: {
+              level: { levelNumber: { gt: 1 } },
+              approvedTaskCount: { gt: 0 },
+            },
+          },
+        },
       ];
     }
 
@@ -341,7 +497,7 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       }
     }
 
-    const formattedUsers = users.map((u) => ({
+    let formattedUsers = users.map((u) => ({
       id: u.id,
       name: u.name,
       phone: u.phone,
@@ -351,11 +507,16 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
       isWithdrawalLocked: u.isWithdrawalLocked,
       withdrawalLockReason: u.withdrawalLockReason,
       createdAt: u.createdAt,
-      walletBalance: u.wallet?.availableBalance || 0,
-      creditPoints: u.wallet?.creditPoints ?? 100,
+      walletBalance: isMiniAdmin ? 0 : (u.wallet?.availableBalance || 0),
+      creditPoints: isMiniAdmin ? 100 : (u.wallet?.creditPoints ?? 100),
       approvedTasksCount: u._count.taskProgress,
-      referralsCount: u._count.referrals,
+      referralsCount: isMiniAdmin ? 0 : u._count.referrals,
     }));
+
+    if (isMiniAdmin) {
+      // Exclude users who graduated Level 1 (>= 10 tasks approved)
+      formattedUsers = formattedUsers.filter((u) => (u.approvedTasksCount ?? 0) < 10);
+    }
 
     res.json({
       users: formattedUsers,
@@ -371,7 +532,7 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
   }
 });
 
-router.get('/level-approvals', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/level-approvals', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const search = (req.query.search as string || '').trim();
     const page = parseInt(req.query.page as string || '1', 10);
@@ -515,7 +676,7 @@ router.get('/level-approvals', requireAdmin, async (req: AdminAuthRequest, res: 
   }
 });
 
-router.post('/level-approvals/toggle', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/level-approvals/toggle', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { userId, levelNumber, isApproved } = req.body;
     const lvlNum = parseInt(levelNumber, 10);
@@ -573,7 +734,7 @@ router.post('/level-approvals/toggle', requireAdmin, async (req: AdminAuthReques
   }
 });
 
-router.post('/level-approvals/batch', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/level-approvals/batch', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { userId, levelNumbers, isApproved } = req.body;
     if (!userId || !Array.isArray(levelNumbers) || levelNumbers.length === 0) {
@@ -691,6 +852,24 @@ router.get('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Re
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+    if (isMiniAdmin) {
+      const hasHigherLevelApproved = user.taskProgress?.some(
+        (tp: any) => tp.status === 'APPROVED' && (tp.task?.level?.levelNumber ?? 1) > 1
+      );
+      const approvedCount = user.taskProgress?.filter((tp: any) => tp.status === 'APPROVED').length || 0;
+      if (hasHigherLevelApproved || approvedCount >= 10) {
+        return res.status(403).json({ error: 'Access Denied: Mini Admins can only view and manage Level 1 users' });
+      }
+
+      // Sanitize financial records for Mini Admin
+      user.depositRequests = [];
+      user.withdrawalRequests = [];
+      user.transactions = [];
+      user.spinEntitlements = [];
+      user.spinHistories = [];
+    }
+
     res.json({ user });
   } catch (err) {
     next(err);
@@ -705,8 +884,26 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
       reason: z.string().optional(),
     }).parse(req.body);
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        taskProgress: {
+          where: { status: 'APPROVED' },
+          include: { task: { include: { level: true } } },
+        },
+      },
+    });
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+    if (isMiniAdmin) {
+      const hasHigherLevelApproved = user.taskProgress?.some(
+        (tp: any) => (tp.task?.level?.levelNumber ?? 1) > 1
+      );
+      if (hasHigherLevelApproved || (user.taskProgress?.length || 0) >= 10) {
+        return res.status(403).json({ error: 'Access Denied: Mini Admins can only manage Level 1 users' });
+      }
+    }
 
     const updated = await prisma.user.update({
       where: { id: userId },
@@ -744,7 +941,7 @@ router.put('/users/:userId/status', requireAdmin, async (req: AdminAuthRequest, 
   }
 });
 
-router.put('/users/:userId/withdrawal-lock', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/users/:userId/withdrawal-lock', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
     const { isLocked, reason } = z.object({
@@ -815,7 +1012,7 @@ router.put('/users/:userId/withdrawal-lock', requireAdmin, async (req: AdminAuth
 });
 
 // Update specific fields of a single user (only modified fields are sent and updated)
-router.patch('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.patch('/users/:userId', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
     const schema = z.object({
@@ -957,7 +1154,7 @@ router.get('/users/:userId/summary', requireAdmin, async (req: AdminAuthRequest,
   }
 });
 
-router.post('/users/:userId/reset-password', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/users/:userId/reset-password', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
     const { temporaryPassword, requireChangeOnLogin, reason } = z.object({
@@ -1006,7 +1203,7 @@ router.post('/users/:userId/reset-password', requireAdmin, async (req: AdminAuth
   }
 });
 
-router.post('/users/:userId/adjust-balance', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/users/:userId/adjust-balance', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
     const { amount, actionType, reason, notes } = z.object({
@@ -1099,7 +1296,7 @@ router.post('/users/:userId/adjust-balance', requireAdmin, async (req: AdminAuth
   }
 });
 
-router.post('/users/:userId/adjust-credit-points', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/users/:userId/adjust-credit-points', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;
     const { points, actionType, reason, notes } = z.object({
@@ -1192,7 +1389,8 @@ router.post('/users/:userId/adjust-credit-points', requireAdmin, async (req: Adm
 
 router.get('/tasks', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
-    const levelNumber = req.query.level ? parseInt(req.query.level as string, 10) : undefined;
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+    const levelNumber = isMiniAdmin ? 1 : (req.query.level ? parseInt(req.query.level as string, 10) : undefined);
     const search = (req.query.search as string || '').trim();
 
     const where: any = {};
@@ -1229,7 +1427,7 @@ router.get('/tasks', requireAdmin, async (req: AdminAuthRequest, res: Response, 
   }
 });
 
-router.put('/tasks/:taskId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/tasks/:taskId', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const taskId = req.params.taskId as string;
     const schema = z.object({
@@ -1284,7 +1482,9 @@ router.put('/tasks/:taskId', requireAdmin, async (req: AdminAuthRequest, res: Re
 
 router.get('/levels', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
     const levels = await prisma.level.findMany({
+      where: isMiniAdmin ? { levelNumber: 1 } : undefined,
       orderBy: { levelNumber: 'asc' },
       include: {
         tasks: { orderBy: { taskNumber: 'asc' } },
@@ -1307,7 +1507,7 @@ router.get('/levels', requireAdmin, async (req: AdminAuthRequest, res: Response,
   }
 });
 
-router.put('/levels/:levelId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/levels/:levelId', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const levelId = req.params.levelId as string;
     const schema = z.object({
@@ -1361,8 +1561,9 @@ router.put('/levels/:levelId', requireAdmin, async (req: AdminAuthRequest, res: 
 
 router.get('/submissions', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
     const status = (req.query.status as string || '').trim();
-    const levelNumber = req.query.level ? parseInt(req.query.level as string, 10) : undefined;
+    const levelNumber = isMiniAdmin ? 1 : (req.query.level ? parseInt(req.query.level as string, 10) : undefined);
     const page = parseInt(req.query.page as string || '1', 10);
     const limit = parseInt(req.query.limit as string || '20', 10);
     const skip = (page - 1) * limit;
@@ -1665,6 +1866,17 @@ router.put('/submissions/:submissionId/review', requireAdmin, async (req: AdminA
       rejectionReason: z.string().optional(),
     }).parse(req.body);
 
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+    if (isMiniAdmin) {
+      const targetSub = await prisma.taskSubmission.findUnique({
+        where: { id: submissionId },
+        select: { task: { select: { level: { select: { levelNumber: true } } } } },
+      });
+      if (!targetSub || targetSub.task?.level?.levelNumber !== 1) {
+        return res.status(403).json({ error: 'Access Denied: Mini Admins can only review Level 1 task submissions' });
+      }
+    }
+
     const result = await executeReviewSubmissionCore({
       submissionId,
       action,
@@ -1692,6 +1904,19 @@ router.post('/submissions/batch-review', requireAdmin, async (req: AdminAuthRequ
       reviewNotes: z.string().optional(),
       rejectionReason: z.string().optional(),
     }).parse(req.body);
+
+    const isMiniAdmin = req.admin?.role === 'MINI_ADMIN';
+    if (isMiniAdmin) {
+      const nonLevel1Count = await prisma.taskSubmission.count({
+        where: {
+          id: { in: submissionIds },
+          task: { level: { levelNumber: { not: 1 } } },
+        },
+      });
+      if (nonLevel1Count > 0) {
+        return res.status(403).json({ error: 'Access Denied: Mini Admins can only review Level 1 task submissions' });
+      }
+    }
 
     const results: { id: string; success: boolean; error?: string }[] = [];
 
@@ -1732,7 +1957,7 @@ router.post('/submissions/batch-review', requireAdmin, async (req: AdminAuthRequ
 // 8. DEPOSIT MANAGEMENT
 // ==========================================
 
-router.get('/deposits', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/deposits', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const status = (req.query.status as string || '').trim();
     const page = parseInt(req.query.page as string || '1', 10);
@@ -1767,7 +1992,7 @@ router.get('/deposits', requireAdmin, async (req: AdminAuthRequest, res: Respons
   }
 });
 
-router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/deposits/:depositId/review', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const depositId = req.params.depositId as string;
     const { action, reviewNotes } = z.object({
@@ -1911,7 +2136,7 @@ router.put('/deposits/:depositId/review', requireAdmin, async (req: AdminAuthReq
 // 9. WITHDRAWAL MANAGEMENT
 // ==========================================
 
-router.get('/withdrawals', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/withdrawals', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const approvalStatus = (req.query.approvalStatus as string || '').trim();
     const paymentStatus = (req.query.paymentStatus as string || '').trim();
@@ -1948,7 +2173,7 @@ router.get('/withdrawals', requireAdmin, async (req: AdminAuthRequest, res: Resp
   }
 });
 
-router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/withdrawals/:withdrawalId/review', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const withdrawalId = req.params.withdrawalId as string;
     const { action, reviewNotes } = z.object({
@@ -2146,7 +2371,7 @@ router.put('/withdrawals/:withdrawalId/review', requireAdmin, async (req: AdminA
   }
 });
 
-router.put('/withdrawals/:withdrawalId/payout', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/withdrawals/:withdrawalId/payout', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const withdrawalId = req.params.withdrawalId as string;
     const { payoutReference, reviewNotes } = z.object({
@@ -2235,7 +2460,7 @@ router.put('/withdrawals/:withdrawalId/payout', requireAdmin, async (req: AdminA
 // 10. SPIN WHEEL MANAGEMENT
 // ==========================================
 
-router.get('/spin', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/spin', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const [prizes, entitlements, pendingMilestones, history] = await Promise.all([
       ensureOfficialSpinPrizes(),
@@ -2283,7 +2508,7 @@ router.get('/spin', requireAdmin, async (req: AdminAuthRequest, res: Response, n
   }
 });
 
-router.post('/spin/assign', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/spin/assign', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { userId, assignedPrizeId, totalSpins, isEligible } = z.object({
       userId: z.string().min(1, 'User is required'),
@@ -2337,7 +2562,7 @@ router.post('/spin/assign', requireAdmin, async (req: AdminAuthRequest, res: Res
   }
 });
 
-router.put('/spin/entitlements/:entitlementId/assign', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/spin/entitlements/:entitlementId/assign', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const entitlementId = req.params.entitlementId as string;
     const { assignedPrizeId } = z.object({
@@ -2384,7 +2609,7 @@ router.put('/spin/entitlements/:entitlementId/assign', requireAdmin, async (req:
   }
 });
 
-router.post('/spin/prizes', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/spin/prizes', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const schema = z.object({
       name: z.string().min(2),
@@ -2420,7 +2645,7 @@ router.post('/spin/prizes', requireAdmin, async (req: AdminAuthRequest, res: Res
 // 11. REFERRALS & TRANSACTIONS
 // ==========================================
 
-router.get('/referrals', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/referrals', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const referrals = await prisma.referral.findMany({
       orderBy: { createdAt: 'desc' },
@@ -2451,7 +2676,7 @@ router.get('/referrals', requireAdmin, async (req: AdminAuthRequest, res: Respon
   }
 });
 
-router.get('/transactions', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/transactions', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const transactionType = (req.query.type as string || '').trim();
     const page = parseInt(req.query.page as string || '1', 10);
@@ -2490,7 +2715,7 @@ router.get('/transactions', requireAdmin, async (req: AdminAuthRequest, res: Res
 // 12. ANNOUNCEMENTS & SETTINGS
 // ==========================================
 
-router.get('/announcements', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/announcements', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const announcements = await prisma.announcement.findMany({
       orderBy: { createdAt: 'desc' },
@@ -2501,7 +2726,7 @@ router.get('/announcements', requireAdmin, async (req: AdminAuthRequest, res: Re
   }
 });
 
-router.post('/announcements', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/announcements', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const schema = z.object({
       title: z.string().min(2),
@@ -2529,7 +2754,7 @@ router.post('/announcements', requireAdmin, async (req: AdminAuthRequest, res: R
   }
 });
 
-router.delete('/announcements/:id', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.delete('/announcements/:id', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const id = req.params.id as string;
     await prisma.announcement.delete({ where: { id } });
@@ -2549,7 +2774,7 @@ router.delete('/announcements/:id', requireAdmin, async (req: AdminAuthRequest, 
   }
 });
 
-router.get('/settings', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/settings', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const settings = await prisma.siteSetting.findMany({
       orderBy: { category: 'asc' },
@@ -2560,7 +2785,7 @@ router.get('/settings', requireAdmin, async (req: AdminAuthRequest, res: Respons
   }
 });
 
-router.put('/settings', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.put('/settings', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     let rawList: Array<{ key: string; value: any }> = [];
 
@@ -2611,7 +2836,7 @@ router.put('/settings', requireAdmin, async (req: AdminAuthRequest, res: Respons
 // 13. REPORTS & AUDIT LOGS
 // ==========================================
 
-router.get('/reports', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/reports', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const [
       totalUsers,
@@ -2651,7 +2876,7 @@ router.get('/reports', requireAdmin, async (req: AdminAuthRequest, res: Response
   }
 });
 
-router.get('/activity-logs', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/activity-logs', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const page = parseInt(req.query.page as string || '1', 10);
     const limit = parseInt(req.query.limit as string || '30', 10);
@@ -2684,7 +2909,7 @@ router.get('/activity-logs', requireAdmin, async (req: AdminAuthRequest, res: Re
 // 17. OFFICIAL ADMIN REFERRAL CODES MANAGEMENT
 // ==========================================
 
-router.get('/referral-codes', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/referral-codes', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const data = await getAdminReferralCodesOverview();
     res.json(data);
@@ -2693,7 +2918,7 @@ router.get('/referral-codes', requireAdmin, async (req: AdminAuthRequest, res: R
   }
 });
 
-router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/referral-codes/generate', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { count = 10 } = req.body;
     const generated = await generateAdditionalCodes(Math.min(Number(count) || 10, 100));
@@ -2716,7 +2941,7 @@ router.post('/referral-codes/generate', requireAdmin, async (req: AdminAuthReque
   }
 });
 
-router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/referral-codes/create', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const { code, notes } = z.object({
       code: z.string().regex(/^[a-zA-Z]{6}$/, 'Referral code must be exactly 6 alphabetical letters (e.g. lbhyfr)'),
@@ -2754,7 +2979,7 @@ router.post('/referral-codes/create', requireAdmin, async (req: AdminAuthRequest
 // 15. TELEGRAM BOT CLIENT MANAGEMENT & QUOTA
 // ==========================================
 
-router.get('/telegram-users', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.get('/telegram-users', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const users = await getAllTelegramUsers();
     res.json({ users });
@@ -2763,7 +2988,7 @@ router.get('/telegram-users', requireAdmin, async (req: AdminAuthRequest, res: R
   }
 });
 
-router.post('/telegram-users/:chatId/grant', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+router.post('/telegram-users/:chatId/grant', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const chatId = req.params.chatId as string;
     const { amount = 10 } = req.body;
@@ -2789,6 +3014,284 @@ router.post('/telegram-users/:chatId/grant', requireAdmin, async (req: AdminAuth
       message: `Successfully granted +${quotaToAdd} invitation codes!`,
       user: result.user,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 16. MINI ADMIN MANAGEMENT & DYNAMIC 10-MIN OTP
+// ==========================================
+
+const createMiniAdminSchema = z.object({
+  email: z.string().email('A valid Gmail or email address is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  username: z.string().optional(),
+});
+
+// List all Mini Admins with their current dynamic 10-minute OTP
+router.get('/mini-admins', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const miniAdmins = await prisma.adminUser.findMany({
+      where: { role: 'MINI_ADMIN' },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        status: true,
+        otpSecret: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const result = miniAdmins.map((admin) => {
+      let otpData = { otp: '------', secondsRemaining: 0, currentWindowIndex: 0 };
+      if (admin.otpSecret) {
+        otpData = getMiniAdminOtp(admin.otpSecret);
+      }
+      return {
+        id: admin.id,
+        username: admin.username,
+        email: admin.email,
+        role: admin.role,
+        status: admin.status,
+        currentOtp: otpData.otp,
+        otpSecondsRemaining: otpData.secondsRemaining,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt,
+      };
+    });
+
+    res.json({ miniAdmins: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create new Mini Admin account
+router.post('/mini-admins', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { email, password, username } = createMiniAdminSchema.parse(req.body);
+    const cleanEmail = email.trim().toLowerCase();
+    const finalUsername = username && username.trim() ? username.trim() : cleanEmail;
+
+    const existing = await prisma.adminUser.findFirst({
+      where: {
+        OR: [
+          { username: finalUsername },
+          { email: cleanEmail },
+        ],
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: 'An admin with this email or username already exists' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+    const otpSecret = generateOtpSecret();
+
+    const newAdmin = await prisma.adminUser.create({
+      data: {
+        email: cleanEmail,
+        username: finalUsername,
+        passwordHash,
+        role: 'MINI_ADMIN',
+        status: 'ACTIVE',
+        otpSecret,
+      },
+    });
+
+    const otpData = getMiniAdminOtp(otpSecret);
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'CREATE_MINI_ADMIN',
+      entityType: 'AdminUser',
+      entityId: newAdmin.id,
+      details: { email: cleanEmail, username: finalUsername },
+      reason: `Master Admin created Mini Admin account ${cleanEmail}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({
+      message: 'Mini Admin account created successfully',
+      miniAdmin: {
+        id: newAdmin.id,
+        email: newAdmin.email,
+        username: newAdmin.username,
+        role: newAdmin.role,
+        status: newAdmin.status,
+        currentOtp: otpData.otp,
+        otpSecondsRemaining: otpData.secondsRemaining,
+        createdAt: newAdmin.createdAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Update Mini Admin account status (ACTIVE / SUSPENDED)
+router.put('/mini-admins/:id/status', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const { status } = z.object({
+      status: z.enum(['ACTIVE', 'SUSPENDED']),
+    }).parse(req.body);
+
+    const miniAdmin = await prisma.adminUser.findUnique({
+      where: { id },
+    });
+
+    if (!miniAdmin || miniAdmin.role !== 'MINI_ADMIN') {
+      return res.status(404).json({ error: 'Mini Admin account not found' });
+    }
+
+    const updated = await prisma.adminUser.update({
+      where: { id },
+      data: { status },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        status: true,
+        updatedAt: true,
+      },
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'UPDATE_MINI_ADMIN_STATUS',
+      entityType: 'AdminUser',
+      entityId: updated.id,
+      previousState: { status: miniAdmin.status },
+      newState: { status },
+      reason: `Master Admin changed Mini Admin ${miniAdmin.email || miniAdmin.username} status to ${status}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ message: `Mini Admin status updated to ${status}`, miniAdmin: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reset Mini Admin account password
+router.put('/mini-admins/:id/password', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const { password } = z.object({
+      password: z.string().min(6, 'Password must be at least 6 characters'),
+    }).parse(req.body);
+
+    const miniAdmin = await prisma.adminUser.findUnique({
+      where: { id },
+    });
+
+    if (!miniAdmin || miniAdmin.role !== 'MINI_ADMIN') {
+      return res.status(404).json({ error: 'Mini Admin account not found' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    await prisma.adminUser.update({
+      where: { id },
+      data: { passwordHash },
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'RESET_MINI_ADMIN_PASSWORD',
+      entityType: 'AdminUser',
+      entityId: id,
+      reason: `Master Admin reset password for Mini Admin ${miniAdmin.email || miniAdmin.username}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ message: 'Mini Admin password updated successfully' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Regenerate dynamic OTP secret for a Mini Admin
+router.post('/mini-admins/:id/regenerate-otp', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const miniAdmin = await prisma.adminUser.findUnique({
+      where: { id },
+    });
+
+    if (!miniAdmin || miniAdmin.role !== 'MINI_ADMIN') {
+      return res.status(404).json({ error: 'Mini Admin account not found' });
+    }
+
+    const newSecret = generateOtpSecret();
+    await prisma.adminUser.update({
+      where: { id },
+      data: { otpSecret: newSecret },
+    });
+
+    const otpData = getMiniAdminOtp(newSecret);
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'REGENERATE_MINI_ADMIN_OTP',
+      entityType: 'AdminUser',
+      entityId: id,
+      reason: `Master Admin rotated OTP secret for Mini Admin ${miniAdmin.email || miniAdmin.username}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      message: 'New OTP secret rotated and generated successfully',
+      currentOtp: otpData.otp,
+      otpSecondsRemaining: otpData.secondsRemaining,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Delete Mini Admin account
+router.delete('/mini-admins/:id', requireAdmin, requireSuperAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const id = req.params.id as string;
+    const miniAdmin = await prisma.adminUser.findUnique({
+      where: { id },
+    });
+
+    if (!miniAdmin || miniAdmin.role !== 'MINI_ADMIN') {
+      return res.status(404).json({ error: 'Mini Admin account not found' });
+    }
+
+    await prisma.adminUser.delete({
+      where: { id },
+    });
+
+    await logAdminAction({
+      adminId: req.admin!.id,
+      adminUsername: req.admin!.username,
+      action: 'DELETE_MINI_ADMIN',
+      entityType: 'AdminUser',
+      entityId: id,
+      details: { email: miniAdmin.email, username: miniAdmin.username },
+      reason: `Master Admin deleted Mini Admin account ${miniAdmin.email || miniAdmin.username}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ message: 'Mini Admin account removed successfully' });
   } catch (err) {
     next(err);
   }

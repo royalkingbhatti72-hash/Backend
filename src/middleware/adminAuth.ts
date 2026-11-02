@@ -6,6 +6,7 @@ import { prisma } from '../prisma';
 export interface AuthenticatedAdmin {
   id: string;
   username: string;
+  email?: string | null;
   role: string;
 }
 
@@ -28,6 +29,7 @@ export async function requireAdmin(req: AdminAuthRequest, res: Response, next: N
       select: {
         id: true,
         username: true,
+        email: true,
         role: true,
         status: true,
       },
@@ -40,10 +42,18 @@ export async function requireAdmin(req: AdminAuthRequest, res: Response, next: N
     req.admin = {
       id: admin.id,
       username: admin.username,
+      email: admin.email,
       role: admin.role,
     };
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Admin Access Denied: Invalid or expired administrator session' });
   }
+}
+
+export function requireSuperAdmin(req: AdminAuthRequest, res: Response, next: NextFunction) {
+  if (!req.admin || req.admin.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ error: 'Access Denied: Master Administrator privileges required' });
+  }
+  next();
 }
