@@ -371,6 +371,273 @@ router.get('/users', requireAdmin, async (req: AdminAuthRequest, res: Response, 
   }
 });
 
+router.get('/level-approvals', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const search = (req.query.search as string || '').trim();
+    const page = parseInt(req.query.page as string || '1', 10);
+    const limit = parseInt(req.query.limit as string || '20', 10);
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { referralCode: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [users, total, allLevels] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          referralCode: true,
+          accountStatus: true,
+          createdAt: true,
+          wallet: {
+            select: {
+              availableBalance: true,
+              creditPoints: true,
+            },
+          },
+          levelUnlocks: {
+            select: {
+              levelNumber: true,
+              isApproved: true,
+            },
+          },
+          taskProgress: {
+            where: { status: 'APPROVED' },
+            select: {
+              task: {
+                select: { levelId: true, id: true },
+              },
+            },
+          },
+          submissions: {
+            where: { status: 'APPROVED' },
+            select: {
+              task: {
+                select: { levelId: true, id: true },
+              },
+            },
+          },
+          levelProgress: {
+            select: {
+              levelId: true,
+              approvedTaskCount: true,
+              completionStatus: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.user.count({ where }),
+      prisma.level.findMany({
+        select: { id: true, levelNumber: true, requiredTaskCount: true },
+        orderBy: { levelNumber: 'asc' },
+      }),
+    ]);
+
+    const formattedUsers = users.map((u) => {
+      const approvedByLevel = new Map<string, Set<string>>();
+      for (const p of u.taskProgress) {
+        if (p.task?.levelId && p.task?.id) {
+          if (!approvedByLevel.has(p.task.levelId)) approvedByLevel.set(p.task.levelId, new Set());
+          approvedByLevel.get(p.task.levelId)!.add(p.task.id);
+        }
+      }
+      for (const s of u.submissions) {
+        if (s.task?.levelId && s.task?.id) {
+          if (!approvedByLevel.has(s.task.levelId)) approvedByLevel.set(s.task.levelId, new Set());
+          approvedByLevel.get(s.task.levelId)!.add(s.task.id);
+        }
+      }
+
+      const lpMap = new Map(u.levelProgress.map((lp) => [lp.levelId, lp]));
+      let completedLevels = 0;
+      let level4Completed = false;
+
+      for (const lvl of allLevels) {
+        const set = approvedByLevel.get(lvl.id);
+        const lp = lpMap.get(lvl.id);
+        const approvedCount = Math.max(set ? set.size : 0, lp?.approvedTaskCount || 0);
+        const isCompleted =
+          lvl.levelNumber === 4
+            ? approvedCount >= 1
+            : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === 'COMPLETED';
+
+        if (isCompleted) {
+          completedLevels = Math.max(completedLevels, lvl.levelNumber);
+          if (lvl.levelNumber === 4) level4Completed = true;
+        }
+      }
+
+      const approvalsMap: Record<number, boolean> = {};
+      for (let i = 5; i <= 10; i++) {
+        const found = u.levelUnlocks.find((ul) => ul.levelNumber === i);
+        approvalsMap[i] = Boolean(found?.isApproved);
+      }
+
+      const currentLevel = Math.min(10, completedLevels + 1);
+
+      return {
+        id: u.id,
+        name: u.name,
+        phone: u.phone,
+        referralCode: u.referralCode,
+        accountStatus: u.accountStatus,
+        createdAt: u.createdAt,
+        walletBalance: u.wallet?.availableBalance || 0,
+        creditPoints: u.wallet?.creditPoints ?? 100,
+        currentLevel,
+        level4Completed,
+        approvals: approvalsMap,
+      };
+    });
+
+    res.json({
+      users: formattedUsers,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/level-approvals/toggle', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { userId, levelNumber, isApproved } = req.body;
+    const lvlNum = parseInt(levelNumber, 10);
+    if (!userId || isNaN(lvlNum) || lvlNum < 5 || lvlNum > 10) {
+      return res.status(400).json({ error: 'Valid userId and levelNumber between 5 and 10 are required.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const unlock = await prisma.userLevelUnlock.upsert({
+      where: {
+        userId_levelNumber: {
+          userId,
+          levelNumber: lvlNum,
+        },
+      },
+      update: {
+        isApproved: Boolean(isApproved),
+        approvedAt: new Date(),
+      },
+      create: {
+        userId,
+        levelNumber: lvlNum,
+        isApproved: Boolean(isApproved),
+        approvedAt: new Date(),
+      },
+    });
+
+    try {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminId: req.admin?.id,
+          adminUsername: req.admin?.username || 'admin',
+          action: isApproved ? 'LEVEL_UNLOCKED' : 'LEVEL_LOCKED',
+          entityType: 'USER_LEVEL_UNLOCK',
+          entityId: `${userId}_L${lvlNum}`,
+          newState: JSON.stringify({ userId, levelNumber: lvlNum, isApproved: Boolean(isApproved) }),
+          reason: `Admin ${isApproved ? 'unlocked' : 'locked'} Level ${lvlNum} for member ${user.name} (${user.phone})`,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('Audit log write error:', auditErr);
+    }
+
+    res.json({
+      success: true,
+      unlock,
+      message: `Level ${lvlNum} ${isApproved ? 'unlocked' : 'locked'} successfully for ${user.name}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/level-approvals/batch', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
+  try {
+    const { userId, levelNumbers, isApproved } = req.body;
+    if (!userId || !Array.isArray(levelNumbers) || levelNumbers.length === 0) {
+      return res.status(400).json({ error: 'Valid userId and levelNumbers array required.' });
+    }
+
+    const validLevels = levelNumbers.map((n: any) => parseInt(n, 10)).filter((n) => n >= 5 && n <= 10);
+    if (validLevels.length === 0) {
+      return res.status(400).json({ error: 'At least one level between 5 and 10 must be specified.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    await Promise.all(
+      validLevels.map((lvl) =>
+        prisma.userLevelUnlock.upsert({
+          where: {
+            userId_levelNumber: {
+              userId,
+              levelNumber: lvl,
+            },
+          },
+          update: {
+            isApproved: Boolean(isApproved),
+            approvedAt: new Date(),
+          },
+          create: {
+            userId,
+            levelNumber: lvl,
+            isApproved: Boolean(isApproved),
+            approvedAt: new Date(),
+          },
+        })
+      )
+    );
+
+    try {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminId: req.admin?.id,
+          adminUsername: req.admin?.username || 'admin',
+          action: isApproved ? 'LEVELS_BATCH_UNLOCKED' : 'LEVELS_BATCH_LOCKED',
+          entityType: 'USER_LEVEL_UNLOCK',
+          entityId: userId,
+          newState: JSON.stringify({ userId, levels: validLevels, isApproved: Boolean(isApproved) }),
+          reason: `Admin ${isApproved ? 'unlocked' : 'locked'} Levels [${validLevels.join(', ')}] for member ${user.name}`,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('Audit log write error:', auditErr);
+    }
+
+    res.json({
+      success: true,
+      message: `Levels [${validLevels.join(', ')}] ${isApproved ? 'unlocked' : 'locked'} successfully for ${user.name}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/users/:userId', requireAdmin, async (req: AdminAuthRequest, res: Response, next) => {
   try {
     const userId = req.params.userId as string;

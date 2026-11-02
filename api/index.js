@@ -66027,7 +66027,8 @@ var taskProgressionService = {
       wallet,
       currentLevelProgressRecords,
       currentLevelSubmissions,
-      userWithdrawalsList
+      userWithdrawalsList,
+      userLevelUnlocks
     ] = await Promise.all([
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },
@@ -66065,8 +66066,13 @@ var taskProgressionService = {
       prisma.withdrawalRequest.findMany({
         where: { userId, approvalStatus: { in: ["PENDING", "APPROVED"] } },
         select: { id: true, notes: true, approvalStatus: true }
+      }),
+      prisma.userLevelUnlock.findMany({
+        where: { userId, isApproved: true },
+        select: { levelNumber: true }
       })
     ]);
+    const approvedLevelNumbers = new Set(userLevelUnlocks.map((u) => u.levelNumber));
     const approvedTasksByLevelId = /* @__PURE__ */ new Map();
     for (const p of userTaskProgressList) {
       if (p.status === "APPROVED" && p.task?.levelId && p.task?.id) {
@@ -66118,10 +66124,10 @@ var taskProgressionService = {
     } else if (levelNumber === 4) {
       isLevelUnlocked = l3Completed;
     } else if (levelNumber === 5) {
-      isLevelUnlocked = l4Completed;
+      isLevelUnlocked = l4Completed && approvedLevelNumbers.has(5);
     } else {
       const prevLvlCompleted = levelStatsByNumber.get(levelNumber - 1)?.isCompleted || false;
-      isLevelUnlocked = prevLvlCompleted;
+      isLevelUnlocked = prevLvlCompleted && approvedLevelNumbers.has(levelNumber);
     }
     let isTask1Eligible = false;
     let task1LockMessage = "";
@@ -66156,13 +66162,13 @@ var taskProgressionService = {
         task1LockMessage = "Complete all tasks in Level 3 first to unlock Level 4 tasks.";
       }
     } else if (levelNumber === 5) {
-      isTask1Eligible = l4Completed;
+      isTask1Eligible = l4Completed && approvedLevelNumbers.has(5);
       if (!isTask1Eligible) {
         task1LockMessage = "Complete at least one Level 4 prepaid task to unlock Level 5 task participation.";
       }
     } else {
       const prevStats = levelStatsByNumber.get(levelNumber - 1);
-      isTask1Eligible = prevStats?.isCompleted || false;
+      isTask1Eligible = (prevStats?.isCompleted || false) && approvedLevelNumbers.has(levelNumber);
       if (!isTask1Eligible) {
         task1LockMessage = `Complete all tasks in Level ${levelNumber - 1} first to start Level ${levelNumber} tasks.`;
       }
@@ -75753,7 +75759,7 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
     await syncDatasetTasksToDatabase();
-    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals] = await Promise.all([
+    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals, userLevelUnlocks] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: "asc" } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: "APPROVED" },
@@ -75769,8 +75775,13 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
       prisma.withdrawalRequest.findMany({
         where: { userId, approvalStatus: { in: ["PENDING", "APPROVED"] } },
         select: { id: true, notes: true }
+      }),
+      prisma.userLevelUnlock.findMany({
+        where: { userId, isApproved: true },
+        select: { levelNumber: true }
       })
     ]);
+    const approvedLevelNumbers = new Set(userLevelUnlocks.map((u) => u.levelNumber));
     const approvedTasksByLevel = /* @__PURE__ */ new Map();
     for (const p of userProgress) {
       if (p.task?.levelId && p.task?.id) {
@@ -75824,13 +75835,13 @@ router3.get("/levels", requireAuth, async (req, res, next) => {
           lockReason = "Complete all tasks in Level 3 first to unlock Level 4.";
         }
       } else if (lvl.levelNumber === 5) {
-        isUnlocked = level4Completed;
+        isUnlocked = level4Completed && approvedLevelNumbers.has(5);
         if (!isUnlocked) {
           lockReason = "Complete any one task in Level 4 to unlock Level 5.";
         }
       } else {
         const prevLevelCompleted = levelStats.get(lvl.levelNumber - 1)?.isCompleted || false;
-        isUnlocked = prevLevelCompleted;
+        isUnlocked = prevLevelCompleted && approvedLevelNumbers.has(lvl.levelNumber);
         if (!isUnlocked) {
           lockReason = `Complete all tasks in Level ${lvl.levelNumber - 1} first to unlock Level ${lvl.levelNumber}.`;
         }
@@ -77723,6 +77734,248 @@ router11.get("/users", requireAdmin, async (req, res, next) => {
         limit,
         totalPages: Math.ceil(total / limit)
       }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.get("/level-approvals", requireAdmin, async (req, res, next) => {
+  try {
+    const search = (req.query.search || "").trim();
+    const page = parseInt(req.query.page || "1", 10);
+    const limit = parseInt(req.query.limit || "20", 10);
+    const skip = (page - 1) * limit;
+    const where = {};
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search, mode: "insensitive" } },
+        { referralCode: { contains: search, mode: "insensitive" } }
+      ];
+    }
+    const [users, total, allLevels] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          referralCode: true,
+          accountStatus: true,
+          createdAt: true,
+          wallet: {
+            select: {
+              availableBalance: true,
+              creditPoints: true
+            }
+          },
+          levelUnlocks: {
+            select: {
+              levelNumber: true,
+              isApproved: true
+            }
+          },
+          taskProgress: {
+            where: { status: "APPROVED" },
+            select: {
+              task: {
+                select: { levelId: true, id: true }
+              }
+            }
+          },
+          submissions: {
+            where: { status: "APPROVED" },
+            select: {
+              task: {
+                select: { levelId: true, id: true }
+              }
+            }
+          },
+          levelProgress: {
+            select: {
+              levelId: true,
+              approvedTaskCount: true,
+              completionStatus: true
+            }
+          }
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit
+      }),
+      prisma.user.count({ where }),
+      prisma.level.findMany({
+        select: { id: true, levelNumber: true, requiredTaskCount: true },
+        orderBy: { levelNumber: "asc" }
+      })
+    ]);
+    const formattedUsers = users.map((u) => {
+      const approvedByLevel = /* @__PURE__ */ new Map();
+      for (const p of u.taskProgress) {
+        if (p.task?.levelId && p.task?.id) {
+          if (!approvedByLevel.has(p.task.levelId)) approvedByLevel.set(p.task.levelId, /* @__PURE__ */ new Set());
+          approvedByLevel.get(p.task.levelId).add(p.task.id);
+        }
+      }
+      for (const s of u.submissions) {
+        if (s.task?.levelId && s.task?.id) {
+          if (!approvedByLevel.has(s.task.levelId)) approvedByLevel.set(s.task.levelId, /* @__PURE__ */ new Set());
+          approvedByLevel.get(s.task.levelId).add(s.task.id);
+        }
+      }
+      const lpMap = new Map(u.levelProgress.map((lp) => [lp.levelId, lp]));
+      let completedLevels = 0;
+      let level4Completed = false;
+      for (const lvl of allLevels) {
+        const set2 = approvedByLevel.get(lvl.id);
+        const lp = lpMap.get(lvl.id);
+        const approvedCount = Math.max(set2 ? set2.size : 0, lp?.approvedTaskCount || 0);
+        const isCompleted = lvl.levelNumber === 4 ? approvedCount >= 1 : approvedCount >= (lvl.requiredTaskCount || 10) || lp?.completionStatus === "COMPLETED";
+        if (isCompleted) {
+          completedLevels = Math.max(completedLevels, lvl.levelNumber);
+          if (lvl.levelNumber === 4) level4Completed = true;
+        }
+      }
+      const approvalsMap = {};
+      for (let i = 5; i <= 10; i++) {
+        const found = u.levelUnlocks.find((ul) => ul.levelNumber === i);
+        approvalsMap[i] = Boolean(found?.isApproved);
+      }
+      const currentLevel = Math.min(10, completedLevels + 1);
+      return {
+        id: u.id,
+        name: u.name,
+        phone: u.phone,
+        referralCode: u.referralCode,
+        accountStatus: u.accountStatus,
+        createdAt: u.createdAt,
+        walletBalance: u.wallet?.availableBalance || 0,
+        creditPoints: u.wallet?.creditPoints ?? 100,
+        currentLevel,
+        level4Completed,
+        approvals: approvalsMap
+      };
+    });
+    res.json({
+      users: formattedUsers,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.post("/level-approvals/toggle", requireAdmin, async (req, res, next) => {
+  try {
+    const { userId, levelNumber, isApproved } = req.body;
+    const lvlNum = parseInt(levelNumber, 10);
+    if (!userId || isNaN(lvlNum) || lvlNum < 5 || lvlNum > 10) {
+      return res.status(400).json({ error: "Valid userId and levelNumber between 5 and 10 are required." });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+    const unlock = await prisma.userLevelUnlock.upsert({
+      where: {
+        userId_levelNumber: {
+          userId,
+          levelNumber: lvlNum
+        }
+      },
+      update: {
+        isApproved: Boolean(isApproved),
+        approvedAt: /* @__PURE__ */ new Date()
+      },
+      create: {
+        userId,
+        levelNumber: lvlNum,
+        isApproved: Boolean(isApproved),
+        approvedAt: /* @__PURE__ */ new Date()
+      }
+    });
+    try {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminId: req.admin?.id,
+          adminUsername: req.admin?.username || "admin",
+          action: isApproved ? "LEVEL_UNLOCKED" : "LEVEL_LOCKED",
+          entityType: "USER_LEVEL_UNLOCK",
+          entityId: `${userId}_L${lvlNum}`,
+          newState: JSON.stringify({ userId, levelNumber: lvlNum, isApproved: Boolean(isApproved) }),
+          reason: `Admin ${isApproved ? "unlocked" : "locked"} Level ${lvlNum} for member ${user.name} (${user.phone})`
+        }
+      });
+    } catch (auditErr) {
+      console.warn("Audit log write error:", auditErr);
+    }
+    res.json({
+      success: true,
+      unlock,
+      message: `Level ${lvlNum} ${isApproved ? "unlocked" : "locked"} successfully for ${user.name}.`
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+router11.post("/level-approvals/batch", requireAdmin, async (req, res, next) => {
+  try {
+    const { userId, levelNumbers, isApproved } = req.body;
+    if (!userId || !Array.isArray(levelNumbers) || levelNumbers.length === 0) {
+      return res.status(400).json({ error: "Valid userId and levelNumbers array required." });
+    }
+    const validLevels = levelNumbers.map((n) => parseInt(n, 10)).filter((n) => n >= 5 && n <= 10);
+    if (validLevels.length === 0) {
+      return res.status(400).json({ error: "At least one level between 5 and 10 must be specified." });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+    await Promise.all(
+      validLevels.map(
+        (lvl) => prisma.userLevelUnlock.upsert({
+          where: {
+            userId_levelNumber: {
+              userId,
+              levelNumber: lvl
+            }
+          },
+          update: {
+            isApproved: Boolean(isApproved),
+            approvedAt: /* @__PURE__ */ new Date()
+          },
+          create: {
+            userId,
+            levelNumber: lvl,
+            isApproved: Boolean(isApproved),
+            approvedAt: /* @__PURE__ */ new Date()
+          }
+        })
+      )
+    );
+    try {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminId: req.admin?.id,
+          adminUsername: req.admin?.username || "admin",
+          action: isApproved ? "LEVELS_BATCH_UNLOCKED" : "LEVELS_BATCH_LOCKED",
+          entityType: "USER_LEVEL_UNLOCK",
+          entityId: userId,
+          newState: JSON.stringify({ userId, levels: validLevels, isApproved: Boolean(isApproved) }),
+          reason: `Admin ${isApproved ? "unlocked" : "locked"} Levels [${validLevels.join(", ")}] for member ${user.name}`
+        }
+      });
+    } catch (auditErr) {
+      console.warn("Audit log write error:", auditErr);
+    }
+    res.json({
+      success: true,
+      message: `Levels [${validLevels.join(", ")}] ${isApproved ? "unlocked" : "locked"} successfully for ${user.name}.`
     });
   } catch (err) {
     next(err);
@@ -79663,8 +79916,8 @@ function getAdminSpaHtml() {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23FFD45A'><path d='M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z'/></svg>" />
-    <script type="module" crossorigin src="/assets/index-BXhZi9GA.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DND5Zl9O.css">
+    <script type="module" crossorigin src="/assets/index-CbLHUUmO.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C_zKc3OY.css">
   </head>
   <body class="bg-[#020712] text-slate-100 font-sans antialiased selection:bg-[#1459E8] selection:text-white min-h-screen">
     <div id="root"></div>

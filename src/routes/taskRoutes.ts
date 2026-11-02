@@ -18,7 +18,7 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
   try {
     const userId = req.user!.id;
     await syncDatasetTasksToDatabase();
-    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals] = await Promise.all([
+    const [levels, userProgress, userLevelProgressList, approvedSubmissions, userWithdrawals, userLevelUnlocks] = await Promise.all([
       prisma.level.findMany({ orderBy: { levelNumber: 'asc' } }),
       prisma.userTaskProgress.findMany({
         where: { userId, status: 'APPROVED' },
@@ -35,7 +35,13 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
         where: { userId, approvalStatus: { in: ['PENDING', 'APPROVED'] } },
         select: { id: true, notes: true },
       }),
+      prisma.userLevelUnlock.findMany({
+        where: { userId, isApproved: true },
+        select: { levelNumber: true },
+      }),
     ]);
+
+    const approvedLevelNumbers = new Set(userLevelUnlocks.map((u) => u.levelNumber));
 
     const approvedTasksByLevel = new Map<string, Set<string>>();
     for (const p of userProgress) {
@@ -98,14 +104,14 @@ router.get('/levels', requireAuth, async (req: AuthRequest, res: Response, next)
           lockReason = 'Complete all tasks in Level 3 first to unlock Level 4.';
         }
       } else if (lvl.levelNumber === 5) {
-        // Level 5 unlocks when any one task in Level 4 is completed
-        isUnlocked = level4Completed;
+        // Level 5 requires level 4 completed AND admin approval
+        isUnlocked = level4Completed && approvedLevelNumbers.has(5);
         if (!isUnlocked) {
           lockReason = 'Complete any one task in Level 4 to unlock Level 5.';
         }
       } else {
         const prevLevelCompleted = levelStats.get(lvl.levelNumber - 1)?.isCompleted || false;
-        isUnlocked = prevLevelCompleted;
+        isUnlocked = prevLevelCompleted && approvedLevelNumbers.has(lvl.levelNumber);
         if (!isUnlocked) {
           lockReason = `Complete all tasks in Level ${lvl.levelNumber - 1} first to unlock Level ${lvl.levelNumber}.`;
         }

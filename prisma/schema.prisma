@@ -38,6 +38,7 @@ model User {
   notifications       Notification[]
   transactions        WalletTransaction[]
   sessions            Session[]
+  levelUnlocks        UserLevelUnlock[]
 
   @@index([accountStatus])
   @@index([createdAt(sort: Desc)])
@@ -394,4 +395,19 @@ model SiteSetting {
   description String?
   category    String   @default("GENERAL") // GENERAL, BRANDING, TASKS, FINANCE, REFERRAL, SPIN
   updatedAt   DateTime @updatedAt
+}
+
+model UserLevelUnlock {
+  id          String   @id @default(cuid())
+  userId      String
+  levelNumber Int
+  isApproved  Boolean  @default(true)
+  approvedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, levelNumber])
+  @@index([userId])
 }

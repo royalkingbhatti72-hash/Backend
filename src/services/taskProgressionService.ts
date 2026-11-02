@@ -53,6 +53,7 @@ export const taskProgressionService = {
       currentLevelProgressRecords,
       currentLevelSubmissions,
       userWithdrawalsList,
+      userLevelUnlocks,
     ] = await Promise.all([
       prisma.level.findMany({
         select: { id: true, levelNumber: true, requiredTaskCount: true },
@@ -91,7 +92,13 @@ export const taskProgressionService = {
         where: { userId, approvalStatus: { in: ['PENDING', 'APPROVED'] } },
         select: { id: true, notes: true, approvalStatus: true },
       }),
+      prisma.userLevelUnlock.findMany({
+        where: { userId, isApproved: true },
+        select: { levelNumber: true },
+      }),
     ]);
+
+    const approvedLevelNumbers = new Set(userLevelUnlocks.map((u) => u.levelNumber));
 
     // Compute approved tasks count per level
     const approvedTasksByLevelId = new Map<string, Set<string>>();
@@ -159,11 +166,11 @@ export const taskProgressionService = {
     } else if (levelNumber === 4) {
       isLevelUnlocked = l3Completed;
     } else if (levelNumber === 5) {
-      // Level 5 requires only one task completed in Level 4
-      isLevelUnlocked = l4Completed;
+      // Level 5 requires only one task completed in Level 4 AND admin approval
+      isLevelUnlocked = l4Completed && approvedLevelNumbers.has(5);
     } else {
       const prevLvlCompleted = levelStatsByNumber.get(levelNumber - 1)?.isCompleted || false;
-      isLevelUnlocked = prevLvlCompleted;
+      isLevelUnlocked = prevLvlCompleted && approvedLevelNumbers.has(levelNumber);
     }
 
     // Determine prerequisite eligibility for Task 1 of this level
@@ -201,15 +208,15 @@ export const taskProgressionService = {
         task1LockMessage = 'Complete all tasks in Level 3 first to unlock Level 4 tasks.';
       }
     } else if (levelNumber === 5) {
-      // In Level 4, client needs only 1 task completed to unlock Level 5 task participation!
-      isTask1Eligible = l4Completed;
+      // In Level 4, client needs 1 task completed AND admin approval to unlock Level 5 task participation!
+      isTask1Eligible = l4Completed && approvedLevelNumbers.has(5);
       if (!isTask1Eligible) {
         task1LockMessage = 'Complete at least one Level 4 prepaid task to unlock Level 5 task participation.';
       }
     } else {
-      // For Levels 6 to 10: requires previous level completed
+      // For Levels 6 to 10: requires previous level completed AND admin approval
       const prevStats = levelStatsByNumber.get(levelNumber - 1);
-      isTask1Eligible = prevStats?.isCompleted || false;
+      isTask1Eligible = (prevStats?.isCompleted || false) && approvedLevelNumbers.has(levelNumber);
       if (!isTask1Eligible) {
         task1LockMessage = `Complete all tasks in Level ${levelNumber - 1} first to start Level ${levelNumber} tasks.`;
       }
